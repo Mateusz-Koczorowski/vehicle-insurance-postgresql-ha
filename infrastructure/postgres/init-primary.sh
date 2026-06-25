@@ -42,7 +42,11 @@ GRANT EXECUTE ON FUNCTION pg_catalog.pg_promote(boolean, integer) TO repmgr;
 SQL
 
 "${psql[@]}" --file /opt/project/database/migrations/001_schema.sql
-"${psql[@]}" --file /opt/project/database/roles/001_roles_and_grants.sql
+"${psql[@]}" \
+  --set agent_password="$APP_AGENT_PASSWORD" \
+  --set adjuster_password="$APP_ADJUSTER_PASSWORD" \
+  --set auditor_password="$APP_AUDITOR_PASSWORD" \
+  --file /opt/project/database/roles/001_roles_and_grants.sql
 
 "${psql[@]}" <<'SQL'
 GRANT grp_agent TO app_agent_anna;
