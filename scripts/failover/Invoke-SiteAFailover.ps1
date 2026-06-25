@@ -12,8 +12,9 @@ function Read-EnvValue([string]$Name) {
     return ($line -split "=", 2)[1]
 }
 
-$repmgrPassword = Read-EnvValue "REPMGR_PASSWORD"
-$agentPassword = Read-EnvValue "APP_AGENT_PASSWORD"
+$postgresPassword = Read-EnvValue "POSTGRES_SUPERUSER_PASSWORD"
+$repmgrPassword   = Read-EnvValue "REPMGR_PASSWORD"
+$agentPassword    = Read-EnvValue "APP_AGENT_PASSWORD"
 
 Write-Host "[failover] fencing location A: stopping pg-primary and pg-standby-a"
 docker compose --env-file $EnvFile stop pg-primary pg-standby-a
@@ -33,7 +34,8 @@ if ($LASTEXITCODE -ne 0) { throw "DR promotion failed" }
 $recovery = "t"
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     $recovery = docker compose --env-file $EnvFile exec -T `
-        pg-standby-dr psql -h 127.0.0.1 -U postgres -d vehicle_insurance `
+        -e "PGPASSWORD=$postgresPassword" pg-standby-dr `
+        psql -h 127.0.0.1 -U postgres -d vehicle_insurance `
         -Atqc "SELECT pg_is_in_recovery();" 2>$null
     if ($recovery.Trim() -eq "f") { break }
     Start-Sleep -Seconds 2

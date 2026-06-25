@@ -1,0 +1,235 @@
+# Evidence: GATE-05 — Replication and Disaster Recovery (15 points)
+# Containers: pg-primary / pg-standby-a / pg-standby-dr / pgpool
+# Date: [run date — fill in during demo]
+# Host: local Docker Desktop (Windows)
+# Grading gate: GATE-05 (15/70 points)
+
+================================================================================
+## 1. repmgr cluster show — one primary, two standbys
+================================================================================
+
+Container: pg-primary
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<REPMGR_PASSWORD>" pg-primary \
+    repmgr -f /run/repmgr/repmgr.conf cluster show
+
+Expected output:
+  ID | Name          | Role    | Status    | Upstream   | Location | Priority | Timeline | Connection string
+  ---+---------------+---------+-----------+------------+----------+----------+----------+----------------------------------------------------
+   1 | pg-primary    | primary | * running |            | default  |      100 |        1 | host=pg-primary user=repmgr dbname=repmgr ...
+   2 | pg-standby-a  | standby |   running | pg-primary | default  |      100 |        1 | host=pg-standby-a user=repmgr dbname=repmgr ...
+   3 | pg-standby-dr | standby |   running | pg-primary | default  |      100 |        1 | host=pg-standby-dr user=repmgr dbname=repmgr ...
+
+Confirms:
+  One primary and two standbys are registered and connected.
+  Automated by: scripts/setup/Test-Cluster.ps1 (repmgr cluster show step)
+
+================================================================================
+## 2. pg_stat_replication — two streaming receivers
+================================================================================
+
+Container: pg-primary
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<POSTGRES_SUPERUSER_PASSWORD>" pg-primary \
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance \
+    -c "SELECT pid, application_name, client_addr, state, sync_state
+        FROM pg_stat_replication;"
+
+Expected output:
+   pid  | application_name | client_addr  |   state   | sync_state
+  ------+------------------+--------------+-----------+------------
+   1234 | pg-standby-a     | 172.31.0.12  | streaming | async
+   5678 | pg-standby-dr    | 172.32.0.11  | streaming | async
+  (2 rows)
+
+Alternative command (scalar):
+  psql ... -Atqc "SELECT count(*) FROM pg_stat_replication WHERE state='streaming';"
+  Expected: 2
+
+Confirms:
+  Both standby nodes are actively streaming WAL from the primary.
+  Automated by: scripts/setup/Test-Cluster.ps1 (pg_stat_replication check, expects count=2)
+
+================================================================================
+## 3. Data replication — marker visible on both standbys
+================================================================================
+
+Step 3a — Write marker on primary:
+Container: pg-primary
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<POSTGRES_SUPERUSER_PASSWORD>" pg-primary \
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance \
+    -c "CREATE TABLE IF NOT EXISTS public.replication_probe(
+          marker text PRIMARY KEY,
+          created_at timestamptz DEFAULT clock_timestamp());
+        INSERT INTO public.replication_probe(marker) VALUES ('REPL-<timestamp>');"
+
+Expected output:
+  CREATE TABLE
+  INSERT 0 1
+
+Step 3b — Verify marker on pg-standby-a:
+Container: pg-standby-a
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<POSTGRES_SUPERUSER_PASSWORD>" pg-standby-a \
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance \
+    -Atqc "SELECT count(*) FROM public.replication_probe WHERE marker='REPL-<timestamp>';"
+
+Expected output: 1
+
+Step 3c — Verify marker on pg-standby-dr:
+Container: pg-standby-dr
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<POSTGRES_SUPERUSER_PASSWORD>" pg-standby-dr \
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance \
+    -Atqc "SELECT count(*) FROM public.replication_probe WHERE marker='REPL-<timestamp>';"
+
+Expected output: 1
+
+Confirms:
+  Data written on primary is visible on both standbys — physical WAL replication works.
+  Automated by: scripts/setup/Test-Cluster.ps1 (marker replication loop)
+
+================================================================================
+## 4. Site A failure and DR promotion
+================================================================================
+
+Step 4a — Stop both site-A nodes (fencing):
+Host (PowerShell):
+  docker compose --env-file .env.example stop pg-primary pg-standby-a
+
+Expected output:
+  [+] Stopping 2/2
+   - Container <project>-pg-primary-1    Stopped
+   - Container <project>-pg-standby-a-1  Stopped
+
+Step 4b — Verify site-A containers are stopped (fencing check):
+Host (PowerShell):
+  docker compose --env-file .env.example ps --status running --services pg-primary pg-standby-a
+
+Expected output: (empty — no running containers in site A)
+
+Step 4c — Promote pg-standby-dr with repmgr:
+Container: pg-standby-dr
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<REPMGR_PASSWORD>" pg-standby-dr \
+    repmgr -f /run/repmgr/repmgr.conf standby promote
+
+Expected output:
+  NOTICE: promoting standby to primary
+  DETAIL: promoting server "pg-standby-dr" (ID: 3) using pg_promote()
+  NOTICE: waiting for promotion to complete
+  NOTICE: standby has been successfully promoted to primary
+
+Confirms:
+  Both site-A nodes are stopped before promotion (fencing prevents split-brain).
+  Automated by: scripts/failover/Invoke-SiteAFailover.ps1
+
+================================================================================
+## 5. pg_is_in_recovery() = false on pg-standby-dr
+================================================================================
+
+Container: pg-standby-dr (after promotion)
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<POSTGRES_SUPERUSER_PASSWORD>" pg-standby-dr \
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance \
+    -Atqc "SELECT pg_is_in_recovery();"
+
+Expected output: f
+
+Confirms:
+  pg-standby-dr is operating as primary — it is not in recovery mode.
+  split-brain is impossible because site-A nodes were stopped before this step.
+  Automated by: scripts/failover/Invoke-SiteAFailover.ps1 (30-attempt polling loop)
+
+================================================================================
+## 6. Write succeeds after failover (through PgPool-II)
+================================================================================
+
+Container: pgpool
+Command:
+  docker compose --env-file .env.example exec -T \
+    -e "PGPASSWORD=<APP_AGENT_PASSWORD>" pgpool \
+    psql -h 127.0.0.1 -p 9999 -U app_agent_anna -d vehicle_insurance \
+    -v ON_ERROR_STOP=1 -Atqc \
+    "INSERT INTO insurance.customers(customer_number,first_name,last_name,national_id)
+     VALUES ('DR-<unix_timestamp>','Failover','Probe','<random_suffix>')
+     RETURNING customer_number;"
+
+Expected output: DR-<unix_timestamp>
+
+Confirms:
+  Writes through the single PgPool-II endpoint succeed after DR promotion.
+  Application endpoint (pgpool:9999) does not change — no reconfiguration needed.
+  Automated by: scripts/failover/Invoke-SiteAFailover.ps1 (final write+verify step)
+
+================================================================================
+## 7. Node rejoin after failover (manual procedure)
+================================================================================
+
+After failover, re-clone a site-A node as a standby of pg-standby-dr:
+
+Host (PowerShell):
+  scripts/failover/Invoke-RejoinNode.ps1 -NodeName pg-primary -Force
+
+What the script does:
+  1. Refuses to proceed if the node is still running.
+  2. Verifies pg-standby-dr is running.
+  3. Creates a temporary docker-compose.override.yml setting PRIMARY_HOST=pg-standby-dr.
+  4. Removes the named Docker volume (pg_primary_data).
+  5. Starts the container — cluster-entrypoint.sh detects empty PGDATA and runs
+     pg_basebackup from pg-standby-dr.
+  6. Waits for the container to become healthy.
+  7. Removes the override file.
+
+Expected final state:
+  pg-primary container is running as a standby of pg-standby-dr.
+  repmgr cluster show (run on pg-standby-dr) reports:
+    ID | Name          | Role    | Status    | Upstream
+    ---+---------------+---------+-----------+---------------
+     1 | pg-primary    | standby |   running | pg-standby-dr
+     3 | pg-standby-dr | primary | * running |
+
+Confirms:
+  Procedure for rejoining old nodes is defined and repeatable (M3 scope item 11).
+
+================================================================================
+## 8. Run all steps automatically
+================================================================================
+
+Full automated M3 test:
+  powershell -NoProfile -ExecutionPolicy Bypass \
+    -File scripts/setup/Test-Cluster.ps1 --env-file .env.example
+
+Full failover simulation:
+  powershell -NoProfile -ExecutionPolicy Bypass \
+    -File scripts/failover/Invoke-SiteAFailover.ps1 --env-file .env.example
+
+Reset to clean state:
+  powershell -NoProfile -ExecutionPolicy Bypass \
+    -File scripts/failover/Reset-Cluster.ps1 --env-file .env.example -Force
+
+================================================================================
+## Related grading gates
+================================================================================
+
+GATE-05 (15 pts): Replication and Disaster Recovery
+  - Physical streaming replication confirmed by pg_stat_replication (section 2)
+  - Data on both standbys confirmed by marker test (section 3)
+  - Site-A failure simulated by stopping both site-A containers (section 4)
+  - Fencing confirmed before promotion — no split-brain possible (section 4b)
+  - DR promotion confirmed by pg_is_in_recovery()=false (section 5)
+  - Write after failover confirmed through PgPool-II (section 6)
+  - Rejoin procedure documented and scripted (section 7)
+
+GATE-02 (10 pts): Architecture
+  - Two locations demonstrated: site_a_net (172.31.0.0/24) and site_b_net (172.32.0.0/24)
+  - pg-primary and pg-standby-a in location A; pg-standby-dr in location B/DR
+  - pg-primary has dual interface: 172.31.0.11 (site A) and 172.32.0.12 (DR link)
