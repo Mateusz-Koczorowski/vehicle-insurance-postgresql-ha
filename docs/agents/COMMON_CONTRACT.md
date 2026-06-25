@@ -8,8 +8,9 @@ Każdy agent przed rozpoczęciem pracy czyta:
 2. `docs/PRD.md`,
 3. odpowiednie sekcje `docs/DATABASE_DESIGN.md`,
 4. odpowiedni etap `docs/IMPLEMENTATION_PLAN.md`,
-5. `docs/agents/QUALITY_GATES.md`,
-6. swój dokument roli w `docs/agents/`.
+5. `docs/architecture/ARCHITECTURE_CONTRACT.md` przy zmianach przekrojowych,
+6. `docs/agents/QUALITY_GATES.md`,
+7. swój dokument roli w `docs/agents/`.
 
 Agent nie powinien czytać wszystkich dużych plików danych ani katalogów generowanych, jeśli nie są potrzebne do zadania.
 
@@ -21,6 +22,8 @@ Agent nie powinien czytać wszystkich dużych plików danych ani katalogów gene
 4. Możliwość przeprowadzenia siedmiominutowej demonstracji.
 5. Prostota rozwiązania.
 6. Dodatkowe funkcje.
+
+Elementy oznaczone w `docs/PRD.md` jako opcjonalne nie mogą blokować ukończenia rdzenia.
 
 ## 3. Granice zmian
 
@@ -35,7 +38,7 @@ Agent nie powinien czytać wszystkich dużych plików danych ani katalogów gene
 
 - Brak prawdziwych sekretów w repozytorium.
 - Przykładowe wartości trafiają do `.env.example`.
-- `.env`, certyfikaty prywatne, katalogi danych i repozytoria backupów muszą być ignorowane.
+- `.env`, certyfikaty prywatne, katalogi danych, dumpy i odtworzone bazy muszą być ignorowane.
 - Konta aplikacji nie mogą być superuserami.
 - Połączenia sieciowe nie mogą używać `trust`.
 - Zapytania aplikacji muszą być parametryzowane.

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ubezpieczenia komunikacyjne{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Ubezpieczenia komunikacyjne</h1>
+    <nav>
+      <a href="/?persona={{ persona.key }}">Start</a>
+      <a href="/customers?persona={{ persona.key }}">Klienci</a>
+      <a href="/policies?persona={{ persona.key }}">Polisy</a>
+      <a href="/claims?persona={{ persona.key }}">Szkody</a>
+      <a href="/audit?persona={{ persona.key }}">Audyt</a>
+    </nav>
+  </header>
+  <section class="diagnostics">
+    <strong>{{ persona.label }}</strong>
+    <span>current_user: <code>{{ diagnostics.database_user }}</code></span>
+    <span>backend: <code>{{ diagnostics.backend_address }}</code></span>
+    <span>recovery: <code>{{ diagnostics.backend_in_recovery }}</code></span>
+  </section>
+  <main>
+    {% if message %}<p class="message">{{ message }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,6 +1,6 @@
 ---
 name: infrastructure-engineer
-description: Builds Docker, PostgreSQL, repmgr, PgPool-II, TLS, networking, failover, and disaster-recovery infrastructure. Use for cluster and routing work.
+description: Builds Docker, PostgreSQL, repmgr, PgPool-II, SCRAM, networking, failover, and disaster-recovery infrastructure. Use for cluster and routing work.
 model: inherit
 color: orange
 ---
@@ -14,5 +14,6 @@ Before acting, read:
 3. `docs/agents/QUALITY_GATES.md`
 4. `docs/agents/INFRASTRUCTURE_ENGINEER.md`
 5. the relevant sections of `docs/PRD.md` and `docs/IMPLEMENTATION_PLAN.md`
+6. all of `docs/architecture/ARCHITECTURE_CONTRACT.md`
 
-Use repeatable configuration and scripts instead of undocumented manual edits. Coordinate pgBackRest interfaces with the backup agent and database initialization contracts with the database agent. Satisfy the applicable quality and grading gates, verify the requested work, and finish using the shared output contract.
+Use repeatable configuration and scripts instead of undocumented manual edits. Coordinate dump/restore access with the backup agent and database initialization contracts with the database agent. Satisfy the applicable quality and grading gates, verify the requested work, and finish using the shared output contract.

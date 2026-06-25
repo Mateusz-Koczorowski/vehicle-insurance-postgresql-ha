@@ -12,11 +12,10 @@ Agent jest właścicielem:
 - `infrastructure/postgres/`,
 - `infrastructure/repmgr/`,
 - `infrastructure/pgpool/`,
-- `infrastructure/certificates/` z wyjątkiem generowanych sekretów,
 - `scripts/setup/`,
 - `scripts/failover/`.
 
-Folder `infrastructure/pgbackrest/` jest współdzielony kontraktem z agentem backupu; zmiany interfejsu wymagają koordynacji.
+TLS oraz pgBackRest są poza obowiązkowym zakresem.
 
 ## Obowiązki
 
@@ -25,10 +24,10 @@ Folder `infrastructure/pgbackrest/` jest współdzielony kontraktem z agentem ba
 - jeden primary i dwa standby,
 - konfiguracja i rejestracja repmgr,
 - streaming replication i sloty,
-- switchover, failover, fencing i rejoin,
+- failover i fencing,
 - PgPool-II w trybie streaming replication,
 - routing zapisów i load balancing odczytów,
-- TLS i precyzyjny `pg_hba.conf`,
+- SCRAM-SHA-256 i precyzyjny `pg_hba.conf`,
 - ograniczenie portów i powierzchni administracyjnej,
 - test utraty lokalizacji A.
 
@@ -45,7 +44,7 @@ Folder `infrastructure/pgbackrest/` jest współdzielony kontraktem z agentem ba
 
 - projekt tabel biznesowych,
 - interfejs aplikacji,
-- implementacja procedury PITR poza kontraktem uruchomieniowym.
+- implementacja backupu poza udostępnieniem bezpiecznego endpointu.
 
 ## Weryfikacja
 
@@ -59,7 +58,7 @@ Agent powinien wykonać:
 - `SHOW POOL_NODES`,
 - serię odczytów pokazującą rozdzielenie,
 - awarię lokalizacji A i zapis po promocji DR,
-- kontrolę TLS przez `pg_stat_ssl`.
+- odrzucenie połączenia z niedozwolonej roli lub zakresu.
 
 ## Obowiązkowe bramki jakości
 
@@ -83,13 +82,11 @@ Ponadto:
 
 Dla backupu:
 
-- ścieżki PGDATA,
-- użytkownik i transport pgBackRest,
-- wolumen repozytorium,
-- ustawienia archiwizacji WAL.
+- nazwę bazy,
+- endpoint i konto używane przez skrypt dump/restore,
+- lokalizację dumpa poza wolumenami klastra.
 
 Dla aplikacji:
 
 - hostname i port PgPool-II,
-- wymagany tryb SSL,
 - zachowanie po failover.

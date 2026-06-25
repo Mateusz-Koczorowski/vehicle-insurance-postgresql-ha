@@ -14,6 +14,10 @@ Każda zmiana musi:
 6. dostarczać dowód potrzebny do końcowej oceny, jeśli dotyczy punktowanego elementu,
 7. nie dodawać niepotrzebnej złożoności do siedmiominutowego demo.
 
+Zakres obowiązkowy i opcjonalny określa `docs/PRD.md`. Agent nie rozszerza
+rdzenia o TLS, pgBackRest/PITR, automatyczny failover, automatyczny rejoin,
+Watchdog ani rozbudowaną aplikację bez wyraźnego polecenia.
+
 ## 2. Definition of Ready
 
 Agent może rozpocząć implementację, gdy zna:
@@ -105,7 +109,7 @@ Zmiana nie przechodzi odbioru, jeśli:
 - dodaje zdalne `trust`,
 - dodaje biznesową regułę `0.0.0.0/0`,
 - nadaje aplikacji superusera,
-- wyłącza TLS bez udokumentowanej przyczyny,
+- deklaruje TLS, mimo że nie został faktycznie skonfigurowany,
 - pozwala ominąć podział ról przez aplikację,
 - zapisuje dane wrażliwe w logach,
 - wykorzystuje dynamiczny SQL bez bezpiecznego cytowania,
@@ -115,7 +119,6 @@ Zmiana nie przechodzi odbioru, jeśli:
 Minimalne wymagania:
 
 - SCRAM-SHA-256,
-- TLS dla połączeń sieciowych,
 - najmniejsze wymagane uprawnienia,
 - precyzyjne podsieci w `pg_hba.conf`,
 - sekrety poza Git,
@@ -161,7 +164,7 @@ docs/evidence/criterion-03-schemas.txt
 docs/evidence/criterion-04-roles.txt
 docs/evidence/criterion-05-failover.txt
 docs/evidence/criterion-06-load-balancing.txt
-docs/evidence/criterion-07-pitr.txt
+docs/evidence/criterion-07-backup-restore.txt
 docs/evidence/criterion-08-security.txt
 ```
 
@@ -203,7 +206,8 @@ Odbiór:
 
 Wymagane:
 
-- minimum dwa schematy; projekt zakłada cztery,
+- trzy schematy projektu (rubryka wymaga minimum dwóch),
+- dokładnie osiem tabel MVP opisanych w `docs/DATABASE_DESIGN.md`,
 - tabele faktycznie umieszczone w schematach,
 - prawa `USAGE`,
 - dowód `\dn` i `\dt`.
@@ -217,7 +221,7 @@ Odbiór:
 
 Wymagane:
 
-- minimum dwie grupy; projekt zakłada trzy,
+- trzy grupy projektu (rubryka wymaga minimum dwóch),
 - różne prawa do różnych tabel,
 - role logujące przypisane do grup,
 - demonstracja operacji dozwolonej i zabronionej.
@@ -265,15 +269,14 @@ Odbiór:
 
 Wymagane:
 
-- pełny backup,
-- archiwizacja WAL,
-- PITR,
-- repozytorium poza lokalizacją podstawową,
+- `pg_dump` w formacie custom,
+- plik kopii poza wolumenami aktywnego klastra,
+- `pg_restore` do oddzielnej bazy,
 - odzyskanie rekordu usuniętego logicznie.
 
 Odbiór:
 
-- restore odbywa się do izolowanego środowiska,
+- restore nie nadpisuje aktywnej bazy,
 - odzyskany rekord jest pokazany,
 - replikacja nie jest przedstawiana jako backup.
 
@@ -282,7 +285,6 @@ Odbiór:
 Wymagane:
 
 - SCRAM-SHA-256,
-- TLS,
 - ograniczone adresy IP,
 - zasada najmniejszych uprawnień,
 - brak sekretów w Git,
@@ -304,7 +306,7 @@ Przed uznaniem projektu za gotowy integrator wykonuje:
 4. test replikacji,
 5. test load balancingu,
 6. test awarii lokalizacji,
-7. test PITR,
+7. test dump/restore,
 8. test miniaplikacji,
 9. skan repozytorium pod kątem sekretów i danych generowanych,
 10. próbę prezentacji ze stoperem.
@@ -319,4 +321,3 @@ Agent ma przerwać i zgłosić problem zamiast tworzyć pozornie działające ob
 - nie da się udowodnić punktowanego zachowania,
 - rozwiązanie zależy od nieudokumentowanego ręcznego kroku,
 - istnieje ryzyko utraty danych użytkownika.
-

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Audyt{% endblock %}
+{% block content %}
+<h2>Dziennik audytu</h2>
+{% if persona.key == "auditor" %}
+<form method="post" action="/denials/auditor-customer">
+  <input type="hidden" name="persona" value="{{ persona.key }}">
+  <button class="danger">Pokaż odmowę modyfikacji klienta</button>
+</form>
+{% endif %}
+<table>
+  <thead><tr><th>Czas</th><th>Użytkownik</th><th>Operacja</th><th>Obiekt</th><th>Klucz</th></tr></thead>
+  <tbody>
+  {% for row in activity %}
+    <tr><td>{{ row.occurred_at }}</td><td>{{ row.database_user }}</td><td>{{ row.action }}</td>
+        <td>{{ row.schema_name }}.{{ row.table_name }}</td><td><code>{{ row.record_key }}</code></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

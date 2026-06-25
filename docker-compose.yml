@@ -1,0 +1,214 @@
+name: ${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME in .env}
+
+x-postgres-environment: &postgres-environment
+  POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+  POSTGRES_USER: ${POSTGRES_SUPERUSER:?Set POSTGRES_SUPERUSER in .env}
+  POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
+  POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+  REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Set REPLICATION_PASSWORD in .env}
+  REPMGR_PASSWORD: ${REPMGR_PASSWORD:?Set REPMGR_PASSWORD in .env}
+  HEALTHCHECK_PASSWORD: ${HEALTHCHECK_PASSWORD:?Set HEALTHCHECK_PASSWORD in .env}
+  BACKUP_PASSWORD: ${BACKUP_PASSWORD:?Set BACKUP_PASSWORD in .env}
+  APP_AGENT_PASSWORD: ${APP_AGENT_PASSWORD:?Set APP_AGENT_PASSWORD in .env}
+  APP_ADJUSTER_PASSWORD: ${APP_ADJUSTER_PASSWORD:?Set APP_ADJUSTER_PASSWORD in .env}
+  APP_AUDITOR_PASSWORD: ${APP_AUDITOR_PASSWORD:?Set APP_AUDITOR_PASSWORD in .env}
+
+x-postgres-common: &postgres-common
+  image: vehicle-insurance-postgres:18.1
+  build:
+    context: .
+    dockerfile: infrastructure/postgres/Dockerfile
+    args:
+      POSTGRES_IMAGE: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env}
+  restart: unless-stopped
+  environment:
+    <<: *postgres-environment
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Atqc "SELECT 1" | grep -qx 1
+    interval: 5s
+    timeout: 4s
+    retries: 30
+    start_period: 15s
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 60s
+
+services:
+  pg-primary:
+    <<: *postgres-common
+    hostname: pg-primary
+    environment:
+      <<: *postgres-environment
+      NODE_ROLE: primary
+      NODE_ID: "1"
+      NODE_NAME: pg-primary
+      NODE_HOST: pg-primary
+    volumes:
+      - pg_primary_data:/var/lib/postgresql
+      - ./backups:/backups
+    networks:
+      site_a_net:
+        ipv4_address: 172.31.0.11
+      site_b_net:
+        ipv4_address: 172.32.0.12
+    labels:
+      project.location: site-a
+      project.role: postgres-primary
+
+  pg-standby-a:
+    <<: *postgres-common
+    hostname: pg-standby-a
+    environment:
+      <<: *postgres-environment
+      NODE_ROLE: standby
+      NODE_ID: "2"
+      NODE_NAME: pg-standby-a
+      NODE_HOST: pg-standby-a
+      PRIMARY_HOST: pg-primary
+      REPLICATION_SLOT: standby_a_slot
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    volumes:
+      - pg_standby_a_data:/var/lib/postgresql
+      - ./backups:/backups
+    networks:
+      site_a_net:
+        ipv4_address: 172.31.0.12
+    labels:
+      project.location: site-a
+      project.role: postgres-standby
+
+  pg-standby-dr:
+    <<: *postgres-common
+    hostname: pg-standby-dr
+    environment:
+      <<: *postgres-environment
+      NODE_ROLE: standby
+      NODE_ID: "3"
+      NODE_NAME: pg-standby-dr
+      NODE_HOST: pg-standby-dr
+      PRIMARY_HOST: pg-primary
+      REPLICATION_SLOT: standby_dr_slot
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    volumes:
+      - pg_standby_dr_data:/var/lib/postgresql
+      - ./backups:/backups
+    networks:
+      site_b_net:
+        ipv4_address: 172.32.0.11
+    labels:
+      project.location: site-b-dr
+      project.role: postgres-standby
+
+  pgpool:
+    image: vehicle-insurance-pgpool:4
+    build:
+      context: .
+      dockerfile: infrastructure/pgpool/Dockerfile
+      args:
+        POSTGRES_IMAGE: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env}
+    hostname: pgpool
+    restart: unless-stopped
+    environment:
+      HEALTHCHECK_PASSWORD: ${HEALTHCHECK_PASSWORD:?Set HEALTHCHECK_PASSWORD in .env}
+      BACKUP_PASSWORD: ${BACKUP_PASSWORD:?Set BACKUP_PASSWORD in .env}
+      APP_AGENT_PASSWORD: ${APP_AGENT_PASSWORD:?Set APP_AGENT_PASSWORD in .env}
+      APP_ADJUSTER_PASSWORD: ${APP_ADJUSTER_PASSWORD:?Set APP_ADJUSTER_PASSWORD in .env}
+      APP_AUDITOR_PASSWORD: ${APP_AUDITOR_PASSWORD:?Set APP_AUDITOR_PASSWORD in .env}
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+      pg-standby-a:
+        condition: service_healthy
+      pg-standby-dr:
+        condition: service_healthy
+    ports:
+      - ${PGPOOL_HOST_BIND:-127.0.0.1}:${PGPOOL_HOST_PORT:-9999}:9999
+    networks:
+      frontend_net:
+        ipv4_address: 172.30.0.20
+      site_a_net:
+        ipv4_address: 172.31.0.20
+      site_b_net:
+        ipv4_address: 172.32.0.30
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 9999 -d vehicle_insurance"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      project.role: pgpool-routing
+
+  insurance-app:
+    image: vehicle-insurance-app:1
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?Set PYTHON_IMAGE in .env}
+    hostname: insurance-app
+    restart: unless-stopped
+    environment:
+      DATABASE_HOST: pgpool
+      DATABASE_PORT: "9999"
+      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      APP_AGENT_PASSWORD: ${APP_AGENT_PASSWORD:?Set APP_AGENT_PASSWORD in .env}
+      APP_ADJUSTER_PASSWORD: ${APP_ADJUSTER_PASSWORD:?Set APP_ADJUSTER_PASSWORD in .env}
+      APP_AUDITOR_PASSWORD: ${APP_AUDITOR_PASSWORD:?Set APP_AUDITOR_PASSWORD in .env}
+    depends_on:
+      pgpool:
+        condition: service_healthy
+    ports:
+      - ${APP_HOST_PORT:-8000}:8000
+    networks:
+      frontend_net:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      project.role: fastapi-demo
+
+networks:
+  frontend_net:
+    name: vehicle_insurance_frontend
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  site_a_net:
+    name: vehicle_insurance_site_a
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+  site_b_net:
+    name: vehicle_insurance_site_b
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.32.0.0/24
+
+volumes:
+  pg_primary_data:
+  pg_standby_a_data:
+  pg_standby_dr_data:

@@ -2,78 +2,64 @@
 
 ## Misja
 
-Zapewnić odtwarzalną kopię bazy i udowodnić odzyskanie danych po logicznym uszkodzeniu, którego replikacja nie cofa.
+Zapewnić prostą kopię logiczną i udowodnić odzyskanie danych po usunięciu, którego replikacja nie cofa.
 
 ## Własność
 
 Agent jest właścicielem:
 
-- `infrastructure/pgbackrest/`,
 - `scripts/backup/`,
-- `scripts/demo/` związanych z backupem i restore,
+- skryptów demonstracyjnych związanych z backupem i restore,
 - testów odtwarzania,
-- dokumentacji RPO, RTO, retencji i procedury PITR.
-
-Zmiany głównego obrazu PostgreSQL i Compose wymagają uzgodnienia z `infrastructure-engineer`.
+- dokumentacji RPO i procedury restore.
 
 ## Obowiązki
 
-- konfiguracja stanza pgBackRest,
-- repozytorium w lokalizacji B,
-- pełny backup i archiwizacja WAL,
-- kontrola `archive-push`,
-- retencja demonstracyjna,
-- przywracanie do izolowanego kontenera lub katalogu,
-- Point-in-Time Recovery do chwili sprzed `DELETE`,
-- dodatkowy logiczny eksport struktury,
-- skrypty dowodowe i instrukcja awaryjna,
+- `pg_dump --format=custom`,
+- zapis dumpa poza wolumenami aktywnego klastra,
+- utworzenie oddzielnej bazy odtworzeniowej,
+- `pg_restore`,
+- odzyskanie rekordu usuniętego po wykonaniu dumpa,
+- skrypty dowodowe,
 - wyjaśnienie różnicy między replikacją a backupem.
 
 ## Decyzje obowiązujące
 
-- Restore nie może niszczyć aktywnego klastra.
-- Repozytorium backupu nie trafia do Git.
-- WAL jest wymagany do PITR.
-- `pg_dump` jest dodatkiem, nie podstawowym mechanizmem Disaster Recovery.
-- Test odzyskiwania musi używać jednoznacznego rekordu kontrolnego i czasu docelowego.
+- Restore nie nadpisuje aktywnej bazy.
+- Pliki dump nie trafiają do Git.
+- `pg_dump` jest podstawowym mechanizmem wymaganym w projekcie.
+- RPO odpowiada chwili ostatniego wykonanego dumpa.
+- pgBackRest, WAL i PITR są rozszerzeniami opcjonalnymi.
 
 ## Poza zakresem
 
 - wybór primary po failover,
 - routing PgPool-II,
-- model biznesowy poza rekordem używanym w teście,
+- pgBackRest i PITR bez wyraźnego polecenia,
+- model biznesowy poza rekordem kontrolnym,
 - UI aplikacji.
 
 ## Weryfikacja
 
 Agent powinien udowodnić:
 
-- poprawny `stanza-create`,
-- pozytywny `pgbackrest check`,
-- backup widoczny w `pgbackrest info`,
-- archiwizację segmentów WAL,
+- powstanie poprawnego pliku custom dump,
 - usunięcie rekordu w aktywnej bazie,
-- obecność rekordu w instancji odtworzonej do wcześniejszego czasu,
+- odtworzenie dumpa do oddzielnej bazy,
+- obecność usuniętego rekordu w bazie odtworzonej,
 - możliwość powtórzenia procedury od czystego stanu.
 
 ## Obowiązkowe bramki jakości
 
-Agent odpowiada przede wszystkim za `GATE-07`.
+Agent odpowiada za `GATE-07`.
 
-Ponadto:
-
-- pozytywny status backupu bez testu restore nie wystarcza,
-- test musi obejmować logiczne usunięcie i odzyskanie konkretnego rekordu,
-- docelowy czas PITR musi być jednoznaczny,
-- restore odbywa się w izolowanym katalogu lub kontenerze,
-- agent dokumentuje RPO, RTO, retencję i ograniczenia demonstracji,
-- skrypt nie może usunąć ani nadpisać aktywnego PGDATA.
+Istnienie pliku dump bez testu restore nie wystarcza. Skrypt nie może usuwać ani nadpisywać aktywnego PGDATA.
 
 ## Handoff
 
 Integrator otrzymuje:
 
-- dokładny scenariusz demo,
-- przewidywany czas restore,
-- komendy i zapisane wyniki,
-- ograniczenia i plan awaryjny, jeśli pełny restore trwa za długo na prezentację.
+- krótki scenariusz demo,
+- czas wykonania dumpa i restore,
+- komendy oraz zapisane wyniki,
+- jasno opisane RPO i ograniczenia mechanizmu.

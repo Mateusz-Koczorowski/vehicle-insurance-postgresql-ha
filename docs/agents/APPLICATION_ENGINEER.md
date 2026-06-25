@@ -17,10 +17,10 @@ Agent jest właścicielem:
 
 - wybór persony bez formularza hasła,
 - osobne połączenie bazodanowe dla każdej persony,
-- dashboard,
-- klienci i pojazdy,
-- polisy i zakresy,
-- szkody, historia i wypłaty,
+- wybór persony i prosty panel,
+- lista klientów i polis,
+- prosty formularz polisy,
+- lista szkód i zmiana statusu,
 - widok audytu,
 - diagnostyka aktualnego użytkownika i węzła,
 - prezentacja błędów uprawnień,
@@ -43,6 +43,7 @@ Agent jest właścicielem:
 - zewnętrzne płatności,
 - skomplikowany design system,
 - zarządzanie klastrem z poziomu UI.
+- pełny CRUD wszystkich tabel.
 
 ## Weryfikacja
 
@@ -72,6 +73,7 @@ Ponadto:
 - warstwa HTTP, logika i dostęp do danych pozostają rozdzielone,
 - aplikacja nie pokazuje stack trace ani poświadczeń,
 - interfejs musi pozostać wystarczająco prosty do prezentacji w 7 minut.
+- agent nie dodaje ekranów, które nie wspierają bezpośrednio prezentacji bazy lub infrastruktury.
 
 ## Handoff
 

@@ -1,0 +1,29 @@
+flowchart LR
+    user["Przeglądarka"]
+
+    subgraph FRONT["Warstwa frontendowa — frontend_net 172.30.0.0/24"]
+        app["insurance-app<br/>172.30.0.10:8000"]
+        pool["pgpool<br/>172.30.0.20:9999"]
+    end
+
+    subgraph A["Lokalizacja A — site_a_net 172.31.0.0/24"]
+        primary[("pg-primary<br/>172.31.0.11<br/>DR: 172.32.0.12")]
+        standbyA[("pg-standby-a<br/>172.31.0.12")]
+    end
+
+    subgraph B["Lokalizacja B / DR — site_b_net 172.32.0.0/24"]
+        standbyDR[("pg-standby-dr<br/>172.32.0.11")]
+    end
+
+    dump[("custom dump<br/>poza wolumenami klastra")]
+    restored[("vehicle_insurance_restore")]
+
+    user -->|"HTTP 8000"| app
+    app -->|"SQL / SCRAM<br/>pgpool:9999"| pool
+    pool -->|"write + eligible reads<br/>172.31.0.20"| primary
+    pool -->|"eligible reads<br/>172.31.0.20"| standbyA
+    pool -->|"eligible reads<br/>172.32.0.30"| standbyDR
+    primary ==>|"streaming WAL"| standbyA
+    primary ==>|"streaming WAL<br/>from 172.32.0.12"| standbyDR
+    primary -.->|"pg_dump --format=custom"| dump
+    dump -.->|"pg_restore"| restored

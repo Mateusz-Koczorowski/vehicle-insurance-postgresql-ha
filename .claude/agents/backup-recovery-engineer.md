@@ -1,6 +1,6 @@
 ---
 name: backup-recovery-engineer
-description: Implements pgBackRest, WAL archiving, retention, isolated restore, PITR tests, and recovery evidence. Use for backup and data-recovery work.
+description: Implements pg_dump, isolated pg_restore, deleted-record recovery tests, and backup evidence. Use for backup and data-recovery work.
 model: inherit
 color: purple
 ---
@@ -13,6 +13,8 @@ Before acting, read:
 2. `docs/agents/COMMON_CONTRACT.md`
 3. `docs/agents/QUALITY_GATES.md`
 4. `docs/agents/BACKUP_RECOVERY_ENGINEER.md`
-5. the backup, recovery, security, and demonstration sections of the project documents
+5. the backup, recovery, security, and demonstration sections of `docs/PRD.md`
+6. the backup stage in `docs/IMPLEMENTATION_PLAN.md`
+7. the backup contract in `docs/architecture/ARCHITECTURE_CONTRACT.md`
 
-Never restore over the active cluster. Keep generated repositories and restored data out of Git. Coordinate changes to the PostgreSQL image, PGDATA, Compose, or volumes with the infrastructure agent. Satisfy the applicable quality and grading gates, verify recovery end to end, and finish using the shared output contract.
+Implement the required `pg_dump`/`pg_restore` workflow. Never restore over the active database. Keep dump files out of Git. Do not implement pgBackRest or PITR unless explicitly requested. Verify recovery end to end and finish using the shared output contract.

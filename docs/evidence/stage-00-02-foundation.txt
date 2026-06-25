@@ -1,0 +1,75 @@
+Etapy 0-2: repozytorium, kontrakt i szkielet Compose
+Aktualizacja zakresu: 2026-06-25 - usunięto opcjonalny placeholder pgBackRest.
+Data: 2026-06-25
+Host: lokalny Docker Desktop (Windows)
+
+1. Walidacja struktury
+Polecenie:
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/Test-RepositoryStructure.ps1
+Wynik:
+  PASS: required structure exists and forbidden artifacts are not tracked.
+Potwierdza:
+  wymagane katalogi istnieją, .env jest ignorowany, brak śledzonych danych,
+  backupów, kluczy prywatnych i artefaktów restore.
+
+2. Walidacja Compose
+Polecenie:
+  docker compose --env-file .env.example config
+Wynik:
+  exit code 0; pięć usług, trzy sieci /24 i trzy wolumeny nazwane.
+Potwierdza:
+  poprawną składnię, interpolację i jednoznaczną adresację.
+
+3. Test negatywny konfiguracji
+Polecenie:
+  docker compose config
+Wynik:
+  exit code 1; COMPOSE_PROJECT_NAME is missing.
+Potwierdza:
+  uruchomienie bez jawnie dostarczonego środowiska jest odrzucane.
+
+4. Status szkieletu
+Polecenie:
+  docker compose --env-file .env.example up -d
+  docker compose --env-file .env.example ps
+Wynik:
+  healthy: pg-primary, pg-standby-a, pg-standby-dr, pgpool, insurance-app.
+Potwierdza:
+  obrazy są dostępne, wolumeny PostgreSQL 18 są poprawnie zamontowane,
+  a healthchecki odróżniają start od gotowości.
+
+5. DNS i adresacja
+Polecenia:
+  docker compose ... exec -T pgpool nslookup <backend>
+  docker compose ... exec -T pgpool nslookup pg-standby-dr
+Wynik:
+  pg-primary=172.31.0.11 (site A) i 172.32.0.12 (DR link)
+  pg-standby-a=172.31.0.12
+  pg-standby-dr=172.32.0.11
+  pgpool=172.30.0.20 z sieci aplikacyjnej
+Potwierdza:
+  wymagane ścieżki między usługami i wieloadresowy primary.
+
+6. Ekspozycja portów
+Wynik:
+  http://127.0.0.1:8000 -> HTTP 200
+  127.0.0.1:9999 -> połączenie TCP poprawne
+  127.0.0.1:5432 -> połączenie odrzucone
+Potwierdza:
+  host widzi wyłącznie aplikację i opcjonalny loopback PgPool-II;
+  backendy PostgreSQL nie są publicznie mapowane.
+
+7. Gotowość PostgreSQL
+Polecenie:
+  psql -U postgres -d vehicle_insurance -Atc <diagnostic query>
+Wynik:
+  wszystkie trzy niezależne instancje odpowiadają;
+  pg-primary zgłasza PostgreSQL 18.1.
+Uwagi:
+  etap 2 celowo nie konfiguruje jeszcze replikacji ani repmgr.
+
+Powiązane bramki:
+  GATE-02: topologia, nazwy, adresy i przepływy mają działający szkielet.
+  GATE-08: brak sekretów w Git, SCRAM przy initdb, brak hostowego 5432.
+  Pełny odbiór GATE-02 i GATE-08 nastąpi po właściwej konfiguracji klastra,
+  precyzyjnym pg_hba.conf i testach odrzuconych połączeń w kolejnych etapach.

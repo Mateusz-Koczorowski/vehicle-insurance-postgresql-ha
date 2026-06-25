@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Polisy{% endblock %}
+{% block content %}
+<h2>Polisy</h2>
+{% if persona.key == "agent" %}
+<form method="post" action="/policies" class="card form-grid">
+  <input type="hidden" name="persona" value="{{ persona.key }}">
+  <h3>Nowa aktywna polisa</h3>
+  <label>Pojazd i właściciel
+    <select name="vehicle_id" id="vehicle" required>
+      {% for row in vehicles %}
+      <option value="{{ row.vehicle_id }}" data-owner="{{ row.owner_customer_id }}">
+        {{ row.registration_number }} — {{ row.vehicle_name }} / {{ row.owner_name }}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>ID klienta <input name="customer_id" id="customer" type="number" min="1" value="1" required></label>
+  <label>Od <input name="valid_from" type="date" required></label>
+  <label>Do <input name="valid_to" type="date" required></label>
+  <label>Składka <input name="total_premium" type="number" min="0" step="0.01" required></label>
+  <label>Zakres
+    <select name="coverage_code"><option>OC</option><option>AC</option><option>ASSISTANCE</option><option>NNW</option></select>
+  </label>
+  <label>Limit <input name="insured_limit" type="number" min="0" step="0.01" required></label>
+  <button type="submit">Utwórz polisę</button>
+</form>
+<script>
+const vehicle = document.getElementById("vehicle");
+const customer = document.getElementById("customer");
+function syncOwner() { customer.value = vehicle.selectedOptions[0].dataset.owner; }
+vehicle.addEventListener("change", syncOwner); syncOwner();
+</script>
+{% endif %}
+{% if persona.key == "adjuster" %}
+<form method="post" action="/denials/adjuster-policy">
+  <input type="hidden" name="persona" value="{{ persona.key }}">
+  <button class="danger">Pokaż odmowę zmiany polisy</button>
+</form>
+{% endif %}
+<table>
+  <thead><tr><th>Numer</th><th>Klient</th><th>Pojazd</th><th>Status</th><th>Okres</th><th>Składka</th></tr></thead>
+  <tbody>
+  {% for row in policies %}
+    <tr><td>{{ row.policy_number }}</td><td>{{ row.customer_number }} — {{ row.customer_name }}</td>
+        <td>{{ row.registration_number }} — {{ row.vehicle_name }}</td><td>{{ row.status }}</td>
+        <td>{{ row.valid_from }} – {{ row.valid_to }}</td><td>{{ row.total_premium }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

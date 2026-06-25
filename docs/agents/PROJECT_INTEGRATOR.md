@@ -25,7 +25,7 @@ Nie powinien przepisywać specjalistycznej implementacji bez konsultacji z wła�
 - przegląd zmian pod kątem PRD,
 - integracja migracji z uruchomieniem klastra,
 - integracja aplikacji z PgPool-II,
-- integracja pgBackRest z obrazem i wolumenami,
+- integracja `pg_dump` i `pg_restore`,
 - testy end-to-end,
 - zbieranie komend i wyników,
 - przygotowanie siedmiominutowego demo,
@@ -50,7 +50,7 @@ Integrator powinien potwierdzić:
 - różnice uprawnień,
 - load balancing,
 - failover lokalizacji,
-- backup i PITR,
+- backup i restore,
 - działanie aplikacji,
 - komplet dokumentacji i dowodów,
 - czas demo poniżej 7 minut.
@@ -68,6 +68,7 @@ Nie może uznać projektu za gotowy, jeśli:
 - sekrety lub katalogi danych są śledzone przez Git,
 - demo przekracza 7 minut,
 - pełne uruchomienie wymaga wiedzy niewpisanej do repozytorium.
+- element opcjonalny opóźnia funkcję punktowaną z zakresu obowiązkowego.
 
 ## Raport końcowy
 

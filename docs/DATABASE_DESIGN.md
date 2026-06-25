@@ -2,50 +2,42 @@
 
 ## 1. Baza i schematy
 
-Nazwa bazy:
+Nazwa bazy to `vehicle_insurance`. Model obowiązkowy zawiera dokładnie trzy
+schematy biznesowe:
 
-```text
-vehicle_insurance
-```
+- `insurance` — klienci, pojazdy, polisy i zakresy ochrony;
+- `claims` — szkody, historia obsługi i wypłaty;
+- `audit` — dziennik operacji.
 
-Schematy:
+Schemat `public` nie przechowuje tabel biznesowych. Domyślne prawo `CREATE` w
+`public` zostaje odebrane rolom aplikacyjnym.
 
-- `identity` - klienci i adresy,
-- `insurance` - pojazdy, polisy, zakresy ochrony i płatności,
-- `claims` - szkody, zdarzenia i wypłaty,
-- `audit` - dziennik operacji.
+## 2. Zakres modelu
 
-Schemat `public` nie będzie używany do tabel biznesowych. Domyślne prawo `CREATE` w `public` zostanie odebrane użytkownikom aplikacyjnym.
+Model celowo ograniczono do ośmiu tabel:
 
-## 2. Diagram kontekstowy danych
+1. `insurance.customers`;
+2. `insurance.vehicles`;
+3. `insurance.policies`;
+4. `insurance.policy_coverages`;
+5. `claims.claims`;
+6. `claims.claim_events`;
+7. `claims.payouts`;
+8. `audit.activity_log`.
 
-```mermaid
-flowchart LR
-    identity["identity<br/>klienci i adresy"]
-    insurance["insurance<br/>pojazdy, polisy, ochrona, płatności"]
-    claims["claims<br/>szkody, historia, wypłaty"]
-    audit["audit<br/>dziennik zmian"]
-
-    identity --> insurance
-    insurance --> claims
-    identity --> claims
-    identity -.-> audit
-    insurance -.-> audit
-    claims -.-> audit
-```
+Nie ma osobnego modułu tożsamości, adresów, harmonogramu płatności składek,
+słowników ochrony ani tabeli łącznikowej polisa–pojazd. W MVP jedna polisa
+dotyczy jednego pojazdu, a kod zakresu ochrony jest przechowywany bezpośrednio w
+`policy_coverages`.
 
 ## 3. ERD
 
 ```mermaid
 erDiagram
-    CUSTOMERS ||--o{ ADDRESSES : has
     CUSTOMERS ||--o{ VEHICLES : owns
     CUSTOMERS ||--o{ POLICIES : purchases
-    POLICIES ||--o{ POLICY_VEHICLES : covers
-    VEHICLES ||--o{ POLICY_VEHICLES : assigned
-    POLICIES ||--o{ POLICY_COVERAGES : includes
-    COVERAGE_TYPES ||--o{ POLICY_COVERAGES : defines
-    POLICIES ||--o{ PAYMENTS : receives
+    VEHICLES ||--o{ POLICIES : insured_by
+    POLICIES ||--|{ POLICY_COVERAGES : includes
     POLICIES ||--o{ CLAIMS : concerns
     VEHICLES ||--o{ CLAIMS : damaged
     CLAIMS ||--o{ CLAIM_EVENTS : has
@@ -63,16 +55,6 @@ erDiagram
         timestamptz updated_at
     }
 
-    ADDRESSES {
-        bigint address_id PK
-        bigint customer_id FK
-        varchar address_type
-        varchar street
-        varchar city
-        varchar postal_code
-        char country_code
-    }
-
     VEHICLES {
         bigint vehicle_id PK
         bigint owner_customer_id FK
@@ -81,13 +63,13 @@ erDiagram
         varchar make
         varchar model
         smallint production_year
-        integer engine_capacity_cc
     }
 
     POLICIES {
         bigint policy_id PK
         varchar policy_number UK
         bigint customer_id FK
+        bigint vehicle_id FK
         varchar status
         date valid_from
         date valid_to
@@ -96,35 +78,13 @@ erDiagram
         timestamptz created_at
     }
 
-    POLICY_VEHICLES {
-        bigint policy_id PK,FK
-        bigint vehicle_id PK,FK
-        boolean is_primary
-    }
-
-    COVERAGE_TYPES {
-        smallint coverage_type_id PK
-        varchar code UK
-        varchar name
-        numeric default_limit
-    }
-
     POLICY_COVERAGES {
         bigint policy_coverage_id PK
         bigint policy_id FK
-        smallint coverage_type_id FK
+        varchar coverage_code
         numeric insured_limit
         numeric deductible
         numeric premium_amount
-    }
-
-    PAYMENTS {
-        bigint payment_id PK
-        bigint policy_id FK
-        numeric amount
-        date due_date
-        timestamptz paid_at
-        varchar status
     }
 
     CLAIMS {
@@ -158,158 +118,77 @@ erDiagram
         timestamptz approved_at
         timestamptz paid_at
     }
+
+    ACTIVITY_LOG {
+        bigint activity_id PK
+        timestamptz occurred_at
+        text database_user
+        text action
+        text schema_name
+        text table_name
+        jsonb record_key
+    }
 ```
 
-Tabela `audit.activity_log` nie jest połączona klasycznym kluczem obcym z każdą tabelą. Przechowuje nazwę schematu, tabeli i klucz rekordu jako metadane.
+`audit.activity_log` nie ma klucza obcego do każdej tabeli. Identyfikuje obiekt
+przez nazwę schematu, tabeli i klucz rekordu zapisany jako JSON.
 
 ## 4. Specyfikacja tabel
 
-### 4.1. `identity.customers`
+### 4.1. `insurance.customers`
 
-Cel: podstawowa kartoteka klientów.
+Kartoteka klientów. `customer_number` i `national_id` są unikalne,
+`national_id` ma 11 cyfr, a znaczniki czasu są ustawiane automatycznie. E-mail
+może być pusty; jeśli występuje, dane demonstracyjne nie mogą go duplikować.
 
-Najważniejsze reguły:
+### 4.2. `insurance.vehicles`
 
-- `customer_number` jest generowany i unikalny,
-- `national_id` ma 11 cyfr,
-- adres e-mail może być pusty, ale jeśli istnieje, musi być unikalny w danych demonstracyjnych,
-- znaczniki czasu są ustawiane automatycznie.
+Pojazdy należące do klientów. `owner_customer_id` wskazuje klienta. VIN ma 17
+znaków, VIN i numer rejestracyjny są unikalne, a rok produkcji ma racjonalne
+ograniczenie.
 
-### 4.2. `identity.addresses`
+### 4.3. `insurance.policies`
 
-Cel: możliwość posiadania adresu zamieszkania i korespondencyjnego.
-
-Reguły:
-
-- dozwolone typy: `HOME`, `CORRESPONDENCE`,
-- kod kraju ma format ISO alpha-2,
-- usunięcie klienta nie jest standardową operacją aplikacji.
-
-### 4.3. `insurance.vehicles`
-
-Cel: pojazdy należące do klientów.
+Nagłówek polisy dla jednego klienta i jednego pojazdu. Statusy:
+`DRAFT`, `ACTIVE`, `SUSPENDED`, `EXPIRED`, `CANCELLED`.
 
 Reguły:
 
-- VIN ma 17 znaków,
-- VIN i numer rejestracyjny są unikalne,
-- rok produkcji mieści się w racjonalnym zakresie,
-- pojemność silnika jest dodatnia.
+- numer polisy jest unikalny;
+- `valid_to >= valid_from`;
+- składka nie jest ujemna;
+- pojazd należy do klienta wskazanego w polisie;
+- aktywacja wymaga co najmniej jednego rekordu `policy_coverages`.
 
-### 4.4. `insurance.policies`
+### 4.4. `insurance.policy_coverages`
 
-Cel: nagłówek umowy ubezpieczenia.
+Zakresy ochrony polisy. Dozwolone kody w MVP: `OC`, `AC`, `ASSISTANCE`, `NNW`.
+Para `(policy_id, coverage_code)` jest unikalna. Limit, udział własny i część
+składki nie są ujemne.
 
-Statusy:
+### 4.5. `claims.claims`
 
-- `DRAFT`,
-- `ACTIVE`,
-- `SUSPENDED`,
-- `EXPIRED`,
-- `CANCELLED`.
+Główny rekord szkody. Statusy: `REPORTED`, `UNDER_REVIEW`, `APPROVED`,
+`REJECTED`, `CLOSED`.
 
-Reguły:
+Szkoda wskazuje polisę i pojazd objęty tą polisą. Data zdarzenia nie może być
+późniejsza niż data zgłoszenia, a szacowana strata nie może być ujemna.
 
-- `valid_to >= valid_from`,
-- składka nie jest ujemna,
-- numer polisy jest unikalny,
-- aktywacja wymaga pojazdu i co najmniej jednego zakresu ochrony.
+### 4.6. `claims.claim_events`
 
-### 4.5. `insurance.policy_vehicles`
+Dopisywana historia obsługi szkody. Przykładowe typy: `REPORTED`,
+`DOCUMENT_RECEIVED`, `INSPECTION`, `STATUS_CHANGED`, `DECISION`, `NOTE`.
+Zdarzeń nie aktualizuje się ani nie usuwa w zwykłym przepływie biznesowym.
 
-Cel: relacja wiele-do-wielu między polisą i pojazdem.
+### 4.7. `claims.payouts`
 
-Reguły:
+Decyzje i realizacja wypłat odszkodowań. Statusy: `PROPOSED`, `APPROVED`,
+`PAID`, `REJECTED`. Kwota musi być dodatnia. Agent nie ma prawa tworzenia ani
+zmiany wypłat.
 
-- para `(policy_id, vehicle_id)` jest kluczem głównym,
-- w demonstracyjnym MVP polisa ma zwykle jeden pojazd,
-- model pozostawia możliwość polis flotowych.
+### 4.8. `audit.activity_log`
 
-### 4.6. `insurance.coverage_types`
-
-Cel: słownik zakresów ochrony.
-
-Dane początkowe:
-
-- `OC`,
-- `AC`,
-- `ASSISTANCE`,
-- `NNW`.
-
-### 4.7. `insurance.policy_coverages`
-
-Cel: zakres ochrony wybrany dla konkretnej polisy.
-
-Reguły:
-
-- unikalna para polisa + typ ochrony,
-- limit, udział własny i składka nie są ujemne.
-
-### 4.8. `insurance.payments`
-
-Cel: harmonogram i stan opłacenia składki.
-
-Statusy:
-
-- `PENDING`,
-- `PAID`,
-- `OVERDUE`,
-- `CANCELLED`.
-
-### 4.9. `claims.claims`
-
-Cel: główny rekord szkody.
-
-Statusy:
-
-- `REPORTED`,
-- `UNDER_REVIEW`,
-- `APPROVED`,
-- `REJECTED`,
-- `CLOSED`.
-
-Reguły:
-
-- szkoda wskazuje polisę i pojazd,
-- pojazd musi należeć do zakresu polisy,
-- data zdarzenia nie może być późniejsza niż data zgłoszenia,
-- szacowana strata nie może być ujemna.
-
-### 4.10. `claims.claim_events`
-
-Cel: historia obsługi szkody.
-
-Przykładowe typy:
-
-- `REPORTED`,
-- `DOCUMENT_RECEIVED`,
-- `INSPECTION`,
-- `STATUS_CHANGED`,
-- `DECISION`,
-- `NOTE`.
-
-Tabela jest dopisywana, nie aktualizowana.
-
-### 4.11. `claims.payouts`
-
-Cel: decyzje i realizacja wypłat.
-
-Statusy:
-
-- `PROPOSED`,
-- `APPROVED`,
-- `PAID`,
-- `REJECTED`.
-
-Reguły:
-
-- kwota jest dodatnia,
-- agent nie posiada prawa `INSERT` ani `UPDATE`,
-- audytor posiada tylko `SELECT`.
-
-### 4.12. `audit.activity_log`
-
-Proponowane kolumny:
+Minimalny dziennik operacji:
 
 ```text
 activity_id        bigint
@@ -326,162 +205,130 @@ new_data           jsonb
 transaction_id     bigint
 ```
 
-Zapis jest realizowany funkcją triggerową `SECURITY DEFINER`. Konta aplikacyjne nie otrzymują bezpośredniego `INSERT`, `UPDATE` ani `DELETE` do dziennika.
+Wpisy tworzy funkcja triggerowa `SECURITY DEFINER` z bezpiecznym
+`search_path`. Konta aplikacyjne nie otrzymują bezpośrednich praw modyfikacji
+dziennika.
 
 ## 5. Indeksy
 
-Minimalny zestaw:
+Minimalny zestaw poza indeksami tworzonymi przez PK i UNIQUE:
 
-- unikalny indeks `customers(customer_number)`,
-- unikalny indeks `customers(national_id)`,
-- indeks `customers(last_name, first_name)`,
-- unikalny indeks `vehicles(vin)`,
-- unikalny indeks `vehicles(registration_number)`,
-- unikalny indeks `policies(policy_number)`,
-- indeks `policies(customer_id, status)`,
-- indeks `policies(valid_from, valid_to)`,
-- unikalny indeks `claims(claim_number)`,
-- indeks `claims(policy_id)`,
-- indeks `claims(status, reported_at)`,
-- indeks `claim_events(claim_id, created_at)`,
-- indeks `payments(status, due_date)`,
-- indeks `activity_log(occurred_at)`,
-- indeks `activity_log(schema_name, table_name)`.
+- `customers(last_name, first_name)`;
+- `vehicles(owner_customer_id)`;
+- `policies(customer_id, status)`;
+- `policies(vehicle_id, status)`;
+- `policies(valid_from, valid_to)`;
+- `policy_coverages(policy_id)`;
+- `claims(policy_id)`;
+- `claims(vehicle_id)`;
+- `claims(status, reported_at)`;
+- `claim_events(claim_id, created_at)`;
+- `payouts(claim_id, status)`;
+- `activity_log(occurred_at)`;
+- `activity_log(schema_name, table_name)`.
 
-## 6. Widoki
+## 6. Widoki i funkcje pomocnicze
 
-### `insurance.active_policy_summary`
+Widoki są opcjonalnymi obiektami SQL, a nie dodatkowymi tabelami. Dopuszczalne
+minimalne widoki:
 
-Łączy klienta, polisę, pojazd i zakresy. Używany przez agentów oraz likwidatorów.
-
-### `claims.open_claim_summary`
-
-Pokazuje otwarte szkody wraz z polisą, klientem, pojazdem i ostatnim zdarzeniem.
-
-### `audit.recent_activity`
-
-Ograniczony widok ostatnich operacji przeznaczony dla audytora.
-
-Widoki upraszczają aplikację i pozwalają nadawać bezpieczniejsze prawa odczytu.
-
-## 7. Role i macierz uprawnień
-
-Legenda:
-
-- `R` - SELECT,
-- `C` - INSERT,
-- `U` - UPDATE,
-- `D` - DELETE,
-- `-` - brak uprawnienia.
-
-| Obiekt | Agent | Likwidator | Audytor |
-|---|---|---|---|
-| `identity.customers` | R/C/U | R | R |
-| `identity.addresses` | R/C/U | R | R |
-| `insurance.vehicles` | R/C/U | R | R |
-| `insurance.policies` | R/C/U | R | R |
-| `insurance.policy_vehicles` | R/C/D | R | R |
-| `insurance.coverage_types` | R | R | R |
-| `insurance.policy_coverages` | R/C/U/D | R | R |
-| `insurance.payments` | R/C/U | R | R |
-| `claims.claims` | R/C | R/C/U | R |
-| `claims.claim_events` | R/C | R/C | R |
-| `claims.payouts` | R | R/C/U | R |
-| `audit.activity_log` | - | - | R |
-
-W projekcie nie przewiduje się biznesowego `DELETE` dla klientów, polis, szkód i wypłat. Zmiana statusu zastępuje usuwanie. Celowe `DELETE` w demonstracji backupu wykonuje wyłącznie administrator techniczny.
-
-## 8. Role PostgreSQL
-
-```mermaid
-flowchart TD
-    agentGroup["grp_agent<br/>NOLOGIN"]
-    adjusterGroup["grp_claims_adjuster<br/>NOLOGIN"]
-    auditorGroup["grp_auditor<br/>NOLOGIN"]
-
-    anna["app_agent_anna<br/>LOGIN"]
-    piotr["app_adjuster_piotr<br/>LOGIN"]
-    ewa["app_auditor_ewa<br/>LOGIN"]
-
-    agentGroup --> anna
-    adjusterGroup --> piotr
-    auditorGroup --> ewa
-```
-
-Każda grupa otrzymuje:
-
-- `CONNECT` do właściwej bazy,
-- `USAGE` tylko do potrzebnych schematów,
-- prawa do konkretnych tabel, sekwencji i widoków,
-- odpowiednie `ALTER DEFAULT PRIVILEGES` dla przyszłych obiektów.
-
-## 9. Funkcje i triggery
+- `insurance.active_policy_summary`;
+- `claims.open_claim_summary`;
+- `audit.recent_activity`.
 
 Planowane funkcje:
 
-- generowanie numeru klienta,
-- generowanie numeru polisy,
-- generowanie numeru szkody,
-- walidacja aktywacji polisy,
-- walidacja zgodności pojazdu ze szkodą,
-- ustawianie `updated_at`,
+- generowanie numeru klienta, polisy i szkody z sekwencji;
+- ustawianie `updated_at`;
+- walidacja właściciela pojazdu i aktywacji polisy;
+- rejestracja zmiany statusu szkody wraz z `claim_events`;
 - audyt zmian.
 
-Funkcje generujące numery powinny opierać się na sekwencjach, a nie `MAX(id)`, aby działały bezpiecznie współbieżnie.
+## 7. Role i macierz uprawnień
 
-## 10. Dane demonstracyjne
+Legenda: `R` — SELECT, `C` — INSERT, `U` — UPDATE, `-` — brak prawa.
+
+| Obiekt | Agent | Likwidator | Audytor |
+|---|---|---|---|
+| `insurance.customers` | R/C/U | R | R |
+| `insurance.vehicles` | R/C/U | R | R |
+| `insurance.policies` | R/C/U | R | R |
+| `insurance.policy_coverages` | R/C/U | R | R |
+| `claims.claims` | R | R/C/U | R |
+| `claims.claim_events` | R | R/C | R |
+| `claims.payouts` | R | R/C/U | R |
+| `audit.activity_log` | - | - | R |
+
+W zwykłych przepływach biznesowych żadna grupa nie otrzymuje `DELETE`.
+Kontrolny `DELETE` w demonstracji backupu wykonuje administrator techniczny w
+ściśle wskazanym środowisku.
+
+Grupy `NOLOGIN`:
+
+- `grp_agent`;
+- `grp_claims_adjuster`;
+- `grp_auditor`.
+
+Role logujące:
+
+- `app_agent_anna` → `grp_agent`;
+- `app_adjuster_piotr` → `grp_claims_adjuster`;
+- `app_auditor_ewa` → `grp_auditor`.
+
+Uprawnienia są nadawane grupom. Każda grupa otrzymuje tylko wymagane `CONNECT`,
+`USAGE`, prawa do tabel, sekwencji i widoków oraz odpowiednie default
+privileges. Role logujące nie mają `SUPERUSER`, `CREATEDB`, `CREATEROLE`,
+`REPLICATION` ani `BYPASSRLS`.
+
+## 8. Dane demonstracyjne
 
 Minimalny zestaw:
 
-- 8 klientów,
-- 10 pojazdów,
-- 10 polis, w tym aktywne, wygasłe i robocze,
-- wszystkie cztery rodzaje ochrony,
-- 12 płatności,
-- 5 szkód o różnych statusach,
-- historia zdarzeń dla każdej szkody,
-- 2 wypłaty,
-- wpisy audytowe generowane przez operacje.
+- 8 fikcyjnych klientów;
+- 10 pojazdów;
+- 10 polis o różnych statusach;
+- wszystkie cztery kody ochrony;
+- 5 szkód o różnych statusach;
+- historia każdej szkody;
+- 2 wypłaty;
+- wpisy audytowe powstałe w wyniku operacji.
 
-Wszystkie dane muszą być jednoznacznie fikcyjne.
+## 9. Kolejność migracji
 
-## 11. Kolejność migracji
+1. baza i odebranie zbędnych praw `public`;
+2. schematy `insurance`, `claims`, `audit`;
+3. tabele `insurance`;
+4. tabele `claims`;
+5. tabela i funkcje `audit`;
+6. ograniczenia i indeksy;
+7. funkcje biznesowe, triggery i opcjonalne widoki;
+8. grupy i role logujące;
+9. GRANT, REVOKE i default privileges;
+10. dane demonstracyjne;
+11. testy spójności i uprawnień.
 
-1. utworzenie bazy,
-2. utworzenie schematów,
-3. utworzenie typów lub ograniczeń statusów,
-4. tabele `identity`,
-5. tabele `insurance`,
-6. tabele `claims`,
-7. tabela i funkcje `audit`,
-8. indeksy,
-9. widoki,
-10. funkcje biznesowe i triggery,
-11. role grupowe i logujące,
-12. GRANT i default privileges,
-13. dane słownikowe,
-14. dane demonstracyjne,
-15. testy uprawnień i spójności.
+## 10. Testy modelu i uprawnień
 
-## 12. Testy modelu
+Testy pozytywne:
 
-### Testy pozytywne
+- agent odczytuje i tworzy klienta, pojazd oraz polisę;
+- likwidator odczytuje polisę, tworzy szkodę i zmienia jej status;
+- audytor odczytuje dane i `audit.activity_log`;
+- trigger zapisuje rzeczywistego `current_user`.
 
-- utworzenie klienta przez agenta,
-- utworzenie pojazdu i polisy,
-- zgłoszenie szkody,
-- aktualizacja szkody przez likwidatora,
-- odczyt dziennika przez audytora.
+Testy negatywne:
 
-### Testy negatywne
+- błędny VIN;
+- powtórzony numer polisy;
+- odwrócony zakres dat polisy;
+- polisa dla pojazdu innego klienta;
+- szkoda dla pojazdu nieobjętego polisą;
+- ujemna wypłata;
+- utworzenie wypłaty przez agenta;
+- edycja polisy przez likwidatora;
+- modyfikacja danych przez audytora;
+- bezpośrednia modyfikacja dziennika audytowego.
 
-- błędny VIN,
-- powtórzony numer polisy,
-- polisa z datą końca wcześniejszą od początku,
-- szkoda dla pojazdu nieobjętego polisą,
-- ujemna wypłata,
-- wypłata utworzona przez agenta,
-- edycja polisy przez likwidatora,
-- modyfikacja danych przez audytora,
-- bezpośrednia zmiana dziennika audytowego.
+Testy uprawnień muszą być wykonywane jako rzeczywiste role logujące, nie przez
+sprawdzanie samych deklaracji GRANT.
 

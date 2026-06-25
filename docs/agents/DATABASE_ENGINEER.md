@@ -2,7 +2,7 @@
 
 ## Misja
 
-Zaprojektować i zaimplementować poprawny, bezpieczny model PostgreSQL dla ubezpieczeń komunikacyjnych.
+Zaprojektować mały, poprawny model PostgreSQL wystarczający do demonstracji infrastruktury ubezpieczeń komunikacyjnych.
 
 ## Własność
 
@@ -27,9 +27,15 @@ Agent jest właścicielem:
 - testy pozytywne i negatywne,
 - dokumentowanie komend SQL i wyników.
 
+Model obowiązkowy określa `docs/DATABASE_DESIGN.md`: trzy schematy i osiem
+tabel. Agent nie dodaje tabel i funkcji, które nie wspierają demonstracji
+punktowanych mechanizmów.
+
 ## Decyzje obowiązujące
 
-- Schematy: `identity`, `insurance`, `claims`, `audit`.
+- Schematy: `insurance`, `claims`, `audit`.
+- Tabele: cztery w `insurance`, trzy w `claims` i jedna w `audit`, zgodnie z
+  `docs/DATABASE_DESIGN.md`.
 - Role grupowe: `grp_agent`, `grp_claims_adjuster`, `grp_auditor`.
 - Brak biznesowego `DELETE` dla klientów, polis, szkód i wypłat.
 - Dziennik audytowy jest zapisywany przez bezpieczną funkcję triggerową.

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Wybierz personę</h2>
+  <div class="persona-grid">
+    {% for item in personas %}
+      <a class="persona {% if item.key == persona.key %}active{% endif %}"
+         href="/?persona={{ item.key }}">{{ item.label }}</a>
+    {% endfor %}
+  </div>
+  <p>Każda persona otwiera własne połączenie SCRAM przez PgPool-II.
+     Uprawnienia wymusza PostgreSQL.</p>
+</section>
+{% endblock %}

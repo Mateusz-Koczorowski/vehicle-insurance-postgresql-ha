@@ -1,0 +1,51 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+infrastructure/certificates/generated/
+
+# PostgreSQL and backup data
+data/
+pgdata/
+**/pgdata/
+postgres-data/
+backup-repository-data/
+backups/
+restore/
+**/restore-data/
+**/pgbackrest-repo/
+*.backup
+*.dump
+*.wal
+
+# Runtime and evidence generated locally
+logs/
+tmp/
+output/
+docs/evidence/generated/
+*.pid
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker overrides
+docker-compose.override.yml
+compose.override.yml

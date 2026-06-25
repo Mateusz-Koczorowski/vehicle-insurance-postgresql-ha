@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Szkody{% endblock %}
+{% block content %}
+<h2>Szkody</h2>
+{% if persona.key == "agent" %}
+<form method="post" action="/denials/agent-payout">
+  <input type="hidden" name="persona" value="{{ persona.key }}">
+  <button class="danger">Pokaż odmowę utworzenia wypłaty</button>
+</form>
+{% endif %}
+<table>
+  <thead><tr><th>Numer</th><th>Polisa / pojazd</th><th>Opis</th><th>Strata</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for row in claims %}
+    <tr>
+      <td>{{ row.claim_number }}</td><td>{{ row.policy_number }} / {{ row.registration_number }}</td>
+      <td>{{ row.description }}</td><td>{{ row.estimated_loss }}</td>
+      <td>
+      {% if persona.key == "adjuster" %}
+        <form method="post" action="/claims/{{ row.claim_id }}/status" class="inline">
+          <input type="hidden" name="persona" value="{{ persona.key }}">
+          <select name="status">
+            {% for status in ["REPORTED","UNDER_REVIEW","APPROVED","REJECTED","CLOSED"] %}
+              <option {% if status == row.status %}selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+          </select><button>Zmień</button>
+        </form>
+      {% else %}{{ row.status }}{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

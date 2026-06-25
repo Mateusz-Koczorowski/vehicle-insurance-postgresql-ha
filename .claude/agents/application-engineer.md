@@ -15,5 +15,6 @@ Before acting, read:
 4. `docs/agents/APPLICATION_ENGINEER.md`
 5. the application requirements in `docs/PRD.md`
 6. the relevant data contract in `docs/DATABASE_DESIGN.md`
+7. `docs/architecture/ARCHITECTURE_CONTRACT.md`
 
 Keep the application deliberately small. Use real restricted PostgreSQL roles for personas and parameterized SQL. Never weaken database permissions to simplify the UI. Satisfy the applicable quality and grading gates, verify changes, and finish using the shared output contract.

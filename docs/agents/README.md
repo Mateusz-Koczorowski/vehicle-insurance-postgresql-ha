@@ -22,8 +22,8 @@ Obowiązkowe dokumenty wspólne:
 | Agent | Odpowiedzialność | Główny obszar zapisu |
 |---|---|---|
 | `database-engineer` | model danych, SQL, migracje, role i audyt | `database/` |
-| `infrastructure-engineer` | Docker, PostgreSQL, repmgr, PgPool-II, TLS i sieci | `infrastructure/`, główny Compose |
-| `backup-recovery-engineer` | pgBackRest, WAL, PITR i test odtworzenia | `infrastructure/pgbackrest/`, `scripts/backup/` |
+| `infrastructure-engineer` | Docker, PostgreSQL, repmgr, PgPool-II, SCRAM i sieci | `infrastructure/`, główny Compose |
+| `backup-recovery-engineer` | `pg_dump`, `pg_restore` i test odzyskania | `scripts/backup/` |
 | `application-engineer` | miniaplikacja FastAPI i jej testy | `app/` |
 | `project-integrator` | integracja, testy przekrojowe, dokumentacja i demo | pliki przekrojowe |
 
