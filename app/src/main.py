@@ -1,6 +1,7 @@
 from datetime import date
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -34,6 +35,11 @@ def database_error_message(exc: PsycopgError) -> str:
     return f"PostgreSQL: {message}"
 
 
+def redirect_with_message(path: str, persona: Persona, message: str) -> RedirectResponse:
+    query = urlencode({"persona": persona.key, "message": message})
+    return RedirectResponse(f"{path}?{query}", status_code=303)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -50,7 +56,7 @@ def home(request: Request, persona: str = "agent") -> HTMLResponse:
 
 
 @app.get("/customers", response_class=HTMLResponse)
-def customers(request: Request, persona: str = "agent") -> HTMLResponse:
+def customers(request: Request, persona: str = "agent", message: str = "") -> HTMLResponse:
     selected = get_persona(persona)
     rows = fetch_all(
         selected,
@@ -63,8 +69,45 @@ def customers(request: Request, persona: str = "agent") -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "customers.html",
-        page_context(request, selected, customers=rows),
+        page_context(request, selected, customers=rows, message=message),
     )
+
+
+@app.post("/customers")
+def create_customer(
+    persona: Annotated[str, Form()],
+    first_name: Annotated[str, Form(min_length=1, max_length=80)],
+    last_name: Annotated[str, Form(min_length=1, max_length=100)],
+    national_id: Annotated[str, Form(pattern=r"^[0-9]{11}$")],
+    email: Annotated[str, Form(max_length=254)] = "",
+    phone: Annotated[str, Form(max_length=30)] = "",
+) -> RedirectResponse:
+    selected = get_persona(persona)
+    try:
+        with connection(selected) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO insurance.customers(
+                        first_name, last_name, national_id, email, phone
+                    )
+                    VALUES (%s, %s, %s, NULLIF(%s, ''), NULLIF(%s, ''))
+                    RETURNING customer_number
+                    """,
+                    (
+                        first_name.strip(),
+                        last_name.strip(),
+                        national_id,
+                        email.strip(),
+                        phone.strip(),
+                    ),
+                )
+                customer = cur.fetchone()
+                assert customer is not None
+        message = f"Created customer {customer['customer_number']}."
+    except PsycopgError as exc:
+        message = database_error_message(exc)
+    return redirect_with_message("/customers", selected, message)
 
 
 @app.get("/policies", response_class=HTMLResponse)
@@ -147,10 +190,7 @@ def create_policy(
                 message = f"Created {policy['policy_number']}."
     except PsycopgError as exc:
         message = database_error_message(exc)
-    return RedirectResponse(
-        f"/policies?persona={selected.key}&message={message}",
-        status_code=303,
-    )
+    return redirect_with_message("/policies", selected, message)
 
 
 @app.get("/claims", response_class=HTMLResponse)
@@ -196,10 +236,7 @@ def update_claim_status(
         message = database_error_message(exc)
     except ValueError as exc:
         message = str(exc)
-    return RedirectResponse(
-        f"/claims?persona={selected.key}&message={message}",
-        status_code=303,
-    )
+    return redirect_with_message("/claims", selected, message)
 
 
 @app.get("/audit", response_class=HTMLResponse)
@@ -263,7 +300,4 @@ def demonstrate_denial(
         message = "Unexpectedly allowed; review database grants."
     except PsycopgError as exc:
         message = database_error_message(exc)
-    return RedirectResponse(
-        f"/{target}?persona={selected.key}&message={message}",
-        status_code=303,
-    )
+    return redirect_with_message(f"/{target}", selected, message)

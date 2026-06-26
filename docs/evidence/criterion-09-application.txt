@@ -1,0 +1,178 @@
+# Evidence: M6 - FastAPI/Jinja mini application
+# Date: 2026-06-26
+# Environment: isolated Docker Compose project `vehicle-insurance-m6-test`
+# Isolation: existing safe overlay `docker-compose.m5-test.yml`
+#            with non-default networks 172.45.0.0/24, 172.46.0.0/24,
+#            172.47.0.0/24 and host ports APP=18006, PgPool=19996.
+# Secrets: passwords were loaded from `.env.example` as environment variables
+#          and are not recorded in this evidence.
+
+## 1. Application scope
+
+The placeholder application was replaced/extended as a small server-rendered
+FastAPI/Jinja2 demo. The application has no login system, OAuth, cluster admin
+panel or broad CRUD. It demonstrates only the database behavior required by M6:
+
+- persona selection:
+  - Anna Agent -> `app_agent_anna`;
+  - Piotr Likwidator -> `app_adjuster_piotr`;
+  - Ewa Audytor -> `app_auditor_ewa`;
+- list views for customers, policies, claims and audit;
+- allowed agent action: create a simple customer record;
+- allowed adjuster action: update claim status, which records claim history;
+- auditor read-only audit view;
+- denied operations executed by PostgreSQL permissions, not by UI simulation:
+  - agent attempts `INSERT` into `claims.payouts`;
+  - adjuster attempts `UPDATE` on `insurance.policies`;
+  - auditor attempts `UPDATE` on `insurance.customers`.
+
+Every rendered screen shows the selected persona, `current_user`,
+`inet_server_addr()` and `pg_is_in_recovery()`. The UI does not display
+passwords or a full DSN.
+
+## 2. PgPool-II endpoint
+
+Application Compose environment:
+
+```text
+DATABASE_HOST=pgpool
+DATABASE_PORT=9999
+DATABASE_NAME=vehicle_insurance
+```
+
+The application code maps each persona to its login role and obtains only the
+password from server-side environment variables. No path uses `postgres`, a
+superuser or the database owner.
+
+## 3. Static application tests
+
+Command on the test host:
+
+```text
+.venv\Scripts\python.exe -m pytest app/tests -q
+```
+
+Result:
+
+```text
+6 passed in 0.34s
+```
+
+The tests cover persona mapping, fallback behavior, route rendering, safe
+diagnostics, server-side role selection, parameterized SQL for customer insert,
+and sanitized PostgreSQL permission errors.
+
+## 4. Compose validation
+
+Command on the test host:
+
+```text
+docker compose --env-file .env.example \
+  -f docker-compose.yml -f docker-compose.m5-test.yml config --quiet
+```
+
+Result: exit code `0`.
+
+## 5. Isolated application stack
+
+Command on the test host:
+
+```text
+$env:APP_HOST_PORT='18006'
+$env:PGPOOL_HOST_PORT='19996'
+docker compose --env-file .env.example -p vehicle-insurance-m6-test \
+  -f docker-compose.yml -f docker-compose.m5-test.yml up -d --build
+```
+
+Health check result:
+
+```text
+vehicle-insurance-m6-test-insurance-app-1   Up (healthy)  0.0.0.0:18006->8000
+vehicle-insurance-m6-test-pg-primary-1      Up (healthy)  5432/tcp
+vehicle-insurance-m6-test-pg-standby-a-1    Up (healthy)  5432/tcp
+vehicle-insurance-m6-test-pg-standby-dr-1   Up (healthy)  5432/tcp
+vehicle-insurance-m6-test-pgpool-1          Up (healthy)  127.0.0.1:19996->9999
+```
+
+PostgreSQL and PCP were not published on the host. PgPool-II was the only SQL
+endpoint available to the app container.
+
+## 6. HTTP verification
+
+Command on the test host:
+
+```text
+.venv\Scripts\python.exe -c "<HTTP verification script using httpx>"
+```
+
+Relevant result:
+
+```text
+home | status=200 | pass=True
+persona agent | status=200 | pass=True
+persona adjuster | status=200 | pass=True
+persona auditor | status=200 | pass=True
+/customers | status=200 | pass=True
+/policies | status=200 | pass=True
+/claims | status=200 | pass=True
+/audit | status=200 | pass=True
+agent create customer | status=200 | pass=True
+adjuster update claim | status=200 | pass=True
+auditor read audit | status=200 | pass=True
+agent denied payout | status=200 | pass=True
+adjuster denied policy | status=200 | pass=True
+auditor denied customer | status=200 | pass=True
+created_customer_national_id=92782508757
+```
+
+What this confirms:
+
+- the home page works;
+- all three personas can be selected;
+- customer, policy, claim and audit views render;
+- diagnostics include `current_user` and backend address;
+- the agent performs an allowed insert as `app_agent_anna`;
+- the adjuster performs an allowed claim status update as
+  `app_adjuster_piotr`;
+- the auditor reads the audit view as `app_auditor_ewa`;
+- three forbidden operations return visible PostgreSQL permission messages.
+
+## 7. Repository safety and whitespace
+
+Command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass \
+  -File scripts/evidence/Test-RepositorySafety.ps1
+```
+
+Result:
+
+```text
+[safety] PASS: no tracked dumps/PGDATA/keys, no network trust, no published PostgreSQL
+```
+
+Command:
+
+```text
+git diff --check
+```
+
+Result: exit code `0`.
+
+Git also warned that LF in edited application files will be replaced by CRLF
+the next time Git touches them; this is not a whitespace error.
+
+## 8. M6 / PRD coverage
+
+- PRD FR-01: persona selection without user-entered passwords.
+- PRD FR-02: safe diagnostics with persona, `current_user` and backend.
+- PRD FR-03: customer and policy views plus an allowed agent insert.
+- PRD FR-04: claim view and allowed adjuster status update.
+- PRD FR-05: auditor reads `audit.activity_log`.
+- PRD FR-06: PostgreSQL-enforced permission denials.
+- PRD NFR-04: no app superuser/postgres connection, server-side secrets and
+  parameterized SQL.
+
+SQL statements in the app use psycopg parameters (`%s` placeholders with a
+separate params tuple). User form data is not concatenated into SQL text.

@@ -2,6 +2,18 @@
 {% block title %}Klienci{% endblock %}
 {% block content %}
 <h2>Klienci</h2>
+{% if persona.key == "agent" %}
+<form method="post" action="/customers" class="card form-grid">
+  <input type="hidden" name="persona" value="{{ persona.key }}">
+  <h3>Nowy klient</h3>
+  <label>Imie <input name="first_name" maxlength="80" required></label>
+  <label>Nazwisko <input name="last_name" maxlength="100" required></label>
+  <label>PESEL testowy <input name="national_id" pattern="[0-9]{11}" maxlength="11" required></label>
+  <label>E-mail <input name="email" type="email" maxlength="254"></label>
+  <label>Telefon <input name="phone" maxlength="30"></label>
+  <button type="submit">Utworz klienta</button>
+</form>
+{% endif %}
 <table>
   <thead><tr><th>Numer</th><th>Imię i nazwisko</th><th>E-mail</th><th>Telefon</th></tr></thead>
   <tbody>
