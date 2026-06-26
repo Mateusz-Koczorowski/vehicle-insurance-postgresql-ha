@@ -1,0 +1,37 @@
+# Evidence: GATE-04 — groups and permissions (5 points)
+# Date: 2026-06-26
+# Host: local Docker Desktop (Windows), isolated container `vehicle-insurance-m1-test`
+
+## Command sequence
+
+After applying the clean M1 migration, roles and seed data, the following tests
+were executed through TCP connections as the actual login roles:
+
+```text
+psql -h 127.0.0.1 -U app_agent_anna -d vehicle_insurance \
+  -f database/tests/003_agent.sql
+psql -h 127.0.0.1 -U app_adjuster_piotr -d vehicle_insurance \
+  -f database/tests/004_adjuster.sql
+psql -h 127.0.0.1 -U app_auditor_ewa -d vehicle_insurance \
+  -f database/tests/005_auditor.sql
+```
+
+Passwords were temporary test values passed only through container environment
+variables and are not present in the repository.
+
+## Relevant result
+
+```text
+app_agent_anna       | app_agent_anna       | agent permission tests: PASS
+app_adjuster_piotr   | app_adjuster_piotr   | adjuster permission tests: PASS
+app_auditor_ewa      | app_auditor_ewa      | auditor permission and audit tests: PASS
+```
+
+## Confirmation
+
+The tests confirm three `NOLOGIN` groups and three dedicated login personas,
+with permissions enforced by PostgreSQL. They verify allowed work for each
+persona and rejected operations including agent payout creation, adjuster
+policy modification, auditor business-data modification and direct audit-log
+modification. The auditor test also confirms that an audit entry identifies
+the real login role `app_agent_anna`.

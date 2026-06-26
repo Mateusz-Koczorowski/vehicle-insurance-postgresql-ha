@@ -1,8 +1,10 @@
 ARG POSTGRES_IMAGE=postgres:18.1-bookworm
+ARG PGPOOL_VERSION=4.7.2-1.pgdg12+1
 FROM ${POSTGRES_IMAGE}
+ARG PGPOOL_VERSION
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends pgpool2 \
+    && apt-get install -y --no-install-recommends pgpool2=${PGPOOL_VERSION} \
     && rm -rf /var/lib/apt/lists/*
 
 COPY infrastructure/pgpool/pgpool.conf /etc/pgpool2/pgpool.conf.template

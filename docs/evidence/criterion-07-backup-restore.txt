@@ -1,0 +1,157 @@
+# Evidence: GATE-07 — Backup and restore (M5)
+# Date: 2026-06-26
+# Environment: isolated Docker Compose project `vehicle-insurance-m5-test`
+# Isolation: temporary networks 172.45.0.0/24, 172.46.0.0/24 and
+#            172.47.0.0/24. Host ports were moved to PgPool 19999 and app
+#            18000 for this test. Existing non-M5 containers, networks,
+#            volumes and placeholder artifacts were not changed.
+# Secrets: passwords were loaded from `.env.example` into process/container
+#          environment variables and are intentionally not written here.
+
+## 1. Compose validation
+
+Command on the test host:
+
+    docker compose --env-file .env.example --project-name vehicle-insurance-m5-test \
+      -f docker-compose.yml -f docker-compose.m5-test.yml config --quiet
+
+Result:
+
+    exit code 0
+
+## 2. PgPool-II endpoint and backup role
+
+Command in `pgpool`, using PgPool-II as the SQL endpoint:
+
+    psql -h pgpool -p 9999 -U postgres -d vehicle_insurance -c 'SHOW POOL_NODES;'
+
+Result:
+
+    node_id | hostname      | status | pg_status | role    | pg_role | replication_state
+    --------+---------------+--------+-----------+---------+---------+------------------
+    0       | pg-primary    | up     | up        | primary | primary |
+    1       | pg-standby-a  | up     | up        | standby | standby | streaming
+    2       | pg-standby-dr | up     | up        | standby | standby | streaming
+
+Command:
+
+    SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolreplication
+    FROM pg_roles WHERE rolname='backup_operator';
+    SELECT has_database_privilege('backup_operator','vehicle_insurance','CONNECT');
+    SELECT has_schema_privilege('backup_operator','insurance','USAGE'),
+           has_table_privilege('backup_operator','insurance.customers','SELECT');
+
+Result:
+
+    backup_operator|f|f|f|f
+    t
+    t|t
+
+`backup_operator` is a login role for logical backup reads. It is not superuser,
+cannot create databases or roles, and is not a replication role.
+
+## 3. Full backup/restore scenario
+
+Command on the test host:
+
+    $env:PGPOOL_HOST_PORT='19999'
+    $env:APP_HOST_PORT='18000'
+    powershell -NoProfile -ExecutionPolicy Bypass \
+      -File scripts/backup/Test-BackupRestore.ps1 \
+      -EnvFile .env.example \
+      -ProjectName vehicle-insurance-m5-test \
+      -ComposeFiles docker-compose.yml,docker-compose.m5-test.yml \
+      -BackupDirectory backups
+
+Important result:
+
+    [backup] removing stale M5 markers from previous interrupted test runs
+    [backup] creating marker M5BR-20260626225811 through pgpool:9999
+    [backup] pg_dump --format=custom through pgpool:9999 as backup_operator
+    [backup] custom archive copied to ignored host path backups\vehicle_insurance-20260626-225811.dump (outside PGDATA volumes)
+    [backup] deleting marker through pgpool:9999
+    [backup] active database has no marker
+    [backup] standby pg-standby-a also has no marker: DELETE replicated
+    [backup] standby pg-standby-dr also has no marker: DELETE replicated
+    [backup] creating separate vehicle_insurance_restore through pgpool:9999
+    [backup] pg_restore only into vehicle_insurance_restore through pgpool:9999
+    [backup] PASS: M5BR-20260626225811 is recovered only in vehicle_insurance_restore
+
+What this proves:
+
+- the control record existed before the dump;
+- `pg_dump --format=custom` used `backup_operator` through `pgpool:9999`;
+- the dump was copied to ignored host path `backups/`, outside the three PGDATA
+  volumes `pg_primary_data`, `pg_standby_a_data` and `pg_standby_dr_data`;
+- the record was deleted from the active database through PgPool;
+- the logical delete replicated to both standby nodes;
+- `pg_restore` targeted only `vehicle_insurance_restore`;
+- `vehicle_insurance` was not restored over or overwritten.
+
+The script removes its container copy and host dump in `finally`, so no dump
+artifact remains after the evidence run.
+
+## 4. Post-run verification
+
+Command through PgPool on active database:
+
+    SELECT 'active', count(*)
+    FROM insurance.customers
+    WHERE customer_number='M5BR-20260626225811';
+
+Result:
+
+    active|0
+
+Command through PgPool on restored database:
+
+    SELECT 'restore', customer_number
+    FROM insurance.customers
+    WHERE customer_number='M5BR-20260626225811';
+
+Result:
+
+    restore|M5BR-20260626225811
+
+Commands on standby nodes:
+
+    SELECT 'pg-standby-a', pg_is_in_recovery(), count(*)
+    FROM insurance.customers
+    WHERE customer_number='M5BR-20260626225811';
+
+    SELECT 'pg-standby-dr', pg_is_in_recovery(), count(*)
+    FROM insurance.customers
+    WHERE customer_number='M5BR-20260626225811';
+
+Results:
+
+    pg-standby-a|t|0
+    pg-standby-dr|t|0
+
+Host check after the script:
+
+    Get-ChildItem -LiteralPath backups -Force | Select-Object Name,Length
+
+Result:
+
+    empty output
+
+## 5. Replication is not backup
+
+The test intentionally deletes a dumped control record from the active database.
+Both standby nodes show count `0`, which proves that physical streaming
+replication copied the logical mistake/deletion. The independent custom dump
+preserved the earlier logical state, and `pg_restore` recovered the record only
+in the separate `vehicle_insurance_restore` database.
+
+RPO for this mechanism is the time of the last successful dump. PITR/WAL archive
+and pgBackRest remain optional project extensions and were not used for GATE-07.
+
+## GATE-07 coverage
+
+- Custom dump: `pg_dump --format=custom` in section 3.
+- Dump outside active PGDATA volumes and ignored by Git: section 3 and `.gitignore`.
+- Restore to separate database: `vehicle_insurance_restore` in sections 3–4.
+- Deleted record recovered from backup: section 4.
+- Active database not overwritten: active count remains `0`.
+- Replication not presented as backup: section 5.

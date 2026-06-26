@@ -1,0 +1,53 @@
+# Isolated M5-only overlay. It deliberately uses subnets outside 172.30-172.32.
+services:
+  insurance-app:
+    networks:
+      frontend_net:
+        ipv4_address: 172.45.0.10
+  pg-primary:
+    volumes:
+      - ./infrastructure/postgres/pg_hba.m5-test.conf:/etc/postgresql/project-pg_hba.conf:ro
+    networks:
+      site_a_net:
+        ipv4_address: 172.46.0.11
+      site_b_net:
+        ipv4_address: 172.47.0.12
+  pg-standby-a:
+    volumes:
+      - ./infrastructure/postgres/pg_hba.m5-test.conf:/etc/postgresql/project-pg_hba.conf:ro
+    networks:
+      site_a_net:
+        ipv4_address: 172.46.0.12
+  pg-standby-dr:
+    volumes:
+      - ./infrastructure/postgres/pg_hba.m5-test.conf:/etc/postgresql/project-pg_hba.conf:ro
+    networks:
+      site_b_net:
+        ipv4_address: 172.47.0.11
+  pgpool:
+    volumes:
+      - ./infrastructure/pgpool/pool_hba.m5-test.conf:/etc/pgpool2/pool_hba.conf:ro
+    networks:
+      frontend_net:
+        ipv4_address: 172.45.0.20
+      site_a_net:
+        ipv4_address: 172.46.0.20
+      site_b_net:
+        ipv4_address: 172.47.0.30
+
+networks:
+  frontend_net:
+    name: vehicle_insurance_m5_test_frontend
+    ipam:
+      config:
+        - subnet: 172.45.0.0/24
+  site_a_net:
+    name: vehicle_insurance_m5_test_site_a
+    ipam:
+      config:
+        - subnet: 172.46.0.0/24
+  site_b_net:
+    name: vehicle_insurance_m5_test_site_b
+    ipam:
+      config:
+        - subnet: 172.47.0.0/24

@@ -15,11 +15,18 @@ function Read-EnvValue([string]$Name) {
 
 $postgresPassword = Read-EnvValue "POSTGRES_SUPERUSER_PASSWORD"
 
+Write-Host "[database] running inventory tests on pg-primary"
+docker compose --env-file $EnvFile exec -T `
+    -e "PGPASSWORD=$postgresPassword" pg-primary `
+    psql -h 127.0.0.1 -U postgres -d vehicle_insurance `
+    -v ON_ERROR_STOP=1 -f /opt/project/database/tests/001_inventory.sql
+if ($LASTEXITCODE -ne 0) { throw "Inventory tests failed" }
+
 Write-Host "[database] running constraint tests on pg-primary"
 docker compose --env-file $EnvFile exec -T `
     -e "PGPASSWORD=$postgresPassword" pg-primary `
     psql -h 127.0.0.1 -U postgres -d vehicle_insurance `
-    -v ON_ERROR_STOP=1 -f /opt/project/database/tests/constraints.sql
+    -v ON_ERROR_STOP=1 -f /opt/project/database/tests/002_constraints.sql
 if ($LASTEXITCODE -ne 0) { throw "Constraint tests failed" }
 
 $inventory = docker compose --env-file $EnvFile exec -T `

@@ -136,18 +136,16 @@ if (-not ($drStatus -and ($drStatus -split "`n" | Where-Object { $_.Trim() -eq "
 # ---------------------------------------------------------------------------
 
 $actionDescription = "erase volume '$fullVolumeName' and re-clone $NodeName from pg-standby-dr"
-$warningMessage    = @"
-WARNING: This will permanently ERASE all data in volume '$fullVolumeName'.
-The node '$NodeName' will be cloned fresh from the current primary (pg-standby-dr).
-This cannot be undone.
-"@
+$warningMessage = "WARNING: This will permanently ERASE all data in volume '$fullVolumeName'.`n" +
+    "The node '$NodeName' will be cloned fresh from the current primary (pg-standby-dr).`n" +
+    'This cannot be undone.'
 
 Write-Host ""
 Write-Host $warningMessage
 Write-Host ""
 
-if (-not $Force -and -not $PSCmdlet.ShouldProcess($fullVolumeName, $actionDescription)) {
-    Write-Host "[rejoin] cancelled — no changes made"
+if (-not $Force -and -not ($PSCmdlet.ShouldProcess($fullVolumeName, $actionDescription))) {
+    Write-Host "[rejoin] cancelled - no changes made"
     return
 }
 
@@ -167,14 +165,17 @@ if ($overrideExists) {
 
 Write-Host "[rejoin] creating temporary docker-compose.override.yml to set PRIMARY_HOST=pg-standby-dr for $NodeName"
 
-$overrideContent = @"
-# Temporary override created by Invoke-RejoinNode.ps1
-# Removed automatically after re-clone completes.
-services:
-  ${NodeName}:
-    environment:
-      PRIMARY_HOST: pg-standby-dr
-"@
+$slotName = $NodeName.Replace('pg-', '').Replace('-', '_') + '_rejoin_slot'
+$overrideContent = @(
+    '# Temporary override created by Invoke-RejoinNode.ps1'
+    '# Removed automatically after re-clone completes.'
+    'services:'
+    "  ${NodeName}:"
+    '    environment:'
+    '      NODE_ROLE: standby'
+    '      PRIMARY_HOST: pg-standby-dr'
+    "      REPLICATION_SLOT: $slotName"
+) -join [Environment]::NewLine
 
 Set-Content -LiteralPath $overrideFile -Value $overrideContent -Encoding utf8
 Write-Host "[rejoin] override file written: $overrideFile"
@@ -192,16 +193,20 @@ try {
     # Remove the PGDATA volume
     # -----------------------------------------------------------------------
 
+    Write-Host "[rejoin] removing stopped container for $NodeName"
+    docker compose --env-file $EnvFile rm --force --stop $NodeName
+    if ($LASTEXITCODE -ne 0) { throw "docker compose rm $NodeName failed (exit $LASTEXITCODE)" }
+
     Write-Host "[rejoin] removing Docker volume: $fullVolumeName"
     docker volume rm $fullVolumeName
     if ($LASTEXITCODE -ne 0) { throw "docker volume rm $fullVolumeName failed (exit $LASTEXITCODE)" }
     Write-Host "[rejoin] volume $fullVolumeName removed"
 
     # -----------------------------------------------------------------------
-    # Start the node — cluster-entrypoint.sh detects empty PGDATA and clones
+    # Start the node - cluster-entrypoint.sh detects empty PGDATA and clones
     # -----------------------------------------------------------------------
 
-    Write-Host "[rejoin] starting $NodeName — cluster-entrypoint.sh will clone from pg-standby-dr"
+    Write-Host "[rejoin] starting $NodeName - cluster-entrypoint.sh will clone from pg-standby-dr"
     docker compose --env-file $EnvFile up -d $NodeName
     if ($LASTEXITCODE -ne 0) { throw "docker compose up -d $NodeName failed (exit $LASTEXITCODE)" }
 

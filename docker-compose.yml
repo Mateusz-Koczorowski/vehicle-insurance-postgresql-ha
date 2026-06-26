@@ -26,7 +26,7 @@ x-postgres-common: &postgres-common
   healthcheck:
     test:
       - CMD-SHELL
-      - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Atqc "SELECT 1" | grep -qx 1
+      - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -h 127.0.0.1 -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-vehicle_insurance}" -Atqc "SELECT 1" | grep -qx 1
     interval: 5s
     timeout: 4s
     retries: 30
@@ -106,15 +106,17 @@ services:
       project.role: postgres-standby
 
   pgpool:
-    image: vehicle-insurance-pgpool:4
+    image: vehicle-insurance-pgpool:4.7.2
     build:
       context: .
       dockerfile: infrastructure/pgpool/Dockerfile
       args:
         POSTGRES_IMAGE: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE in .env}
+        PGPOOL_VERSION: ${PGPOOL_VERSION:-4.7.2-1.pgdg12+1}
     hostname: pgpool
     restart: unless-stopped
     environment:
+      POSTGRES_SUPERUSER_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in .env}
       HEALTHCHECK_PASSWORD: ${HEALTHCHECK_PASSWORD:?Set HEALTHCHECK_PASSWORD in .env}
       BACKUP_PASSWORD: ${BACKUP_PASSWORD:?Set BACKUP_PASSWORD in .env}
       APP_AGENT_PASSWORD: ${APP_AGENT_PASSWORD:?Set APP_AGENT_PASSWORD in .env}

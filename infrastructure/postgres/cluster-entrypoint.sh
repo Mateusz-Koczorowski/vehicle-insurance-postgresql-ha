@@ -93,6 +93,8 @@ if [[ ! -s "$PGDATA/PG_VERSION" ]]; then
     --slot="$REPLICATION_SLOT" \
     --checkpoint=fast \
     --progress
+  chmod 0700 "$PGDATA"
+  sed -i "s/target_session_attrs=any /target_session_attrs=any application_name=${NODE_NAME} /" "$PGDATA/postgresql.auto.conf"
 fi
 
 gosu postgres postgres \

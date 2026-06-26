@@ -68,4 +68,13 @@ if ! psql --username "$POSTGRES_USER" --dbname postgres --tuples-only --command 
   createdb --username "$POSTGRES_USER" --owner repmgr repmgr
 fi
 
+psql --username "$POSTGRES_USER" --dbname repmgr --set ON_ERROR_STOP=1 \
+  --command "CREATE EXTENSION IF NOT EXISTS repmgr;"
+psql --username "$POSTGRES_USER" --dbname repmgr --set ON_ERROR_STOP=1 <<'SQL'
+GRANT USAGE ON SCHEMA repmgr TO repmgr;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA repmgr TO repmgr;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA repmgr TO repmgr;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA repmgr TO repmgr;
+SQL
+
 echo "[init-primary] database, roles and seed initialized"

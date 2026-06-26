@@ -17,7 +17,7 @@ $repmgrPassword = Read-EnvValue "REPMGR_PASSWORD"
 $marker = "REPL-" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
 Write-Host "[cluster] repmgr cluster show"
-docker compose --env-file $EnvFile exec -T `
+docker compose --env-file $EnvFile exec -T --user postgres `
     -e "PGPASSWORD=$repmgrPassword" pg-primary `
     repmgr -f /run/repmgr/repmgr.conf cluster show
 if ($LASTEXITCODE -ne 0) { throw "repmgr cluster show failed" }

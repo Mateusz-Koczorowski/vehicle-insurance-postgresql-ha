@@ -1,0 +1,49 @@
+# Evidence: GATE-03 — schemas and data model (5 points)
+# Date: 2026-06-26
+# Host: local Docker Desktop (Windows), isolated container `vehicle-insurance-m1-test`
+
+## Command sequence
+
+1. Started a disposable `postgres:18.1-bookworm` container with an empty
+   `vehicle_insurance` database.
+2. Executed, in order:
+
+```text
+psql -U postgres -d postgres -f database/migrations/000_database.sql
+psql -U postgres -d vehicle_insurance -f database/migrations/001_schema.sql
+psql -U postgres -d vehicle_insurance -f database/roles/001_roles_and_grants.sql
+psql -U postgres -d vehicle_insurance -f database/seed/001_demo_data.sql
+psql -U postgres -d vehicle_insurance -f database/tests/001_inventory.sql
+psql -U postgres -d vehicle_insurance -f database/tests/002_constraints.sql
+```
+
+Passwords were supplied only as temporary container environment variables and
+are not recorded in this evidence.
+
+## Relevant result
+
+```text
+schema_name | table_name
+------------+------------------
+audit       | activity_log
+claims      | claim_events
+claims      | claims
+claims      | payouts
+insurance   | customers
+insurance   | policies
+insurance   | policy_coverages
+insurance   | vehicles
+(8 rows)
+
+inventory tests: PASS
+constraint and business trigger tests: PASS
+```
+
+## Confirmation
+
+The clean migration created exactly three business schemas and eight business
+tables, with no business tables in `public`. The constraint suite also
+confirmed positive and negative domain cases: invalid VIN, duplicate policy,
+invalid dates, mismatched owner/vehicle, activation without coverage,
+uncovered claim vehicle, negative payout, status-event creation and audit
+trigger operation.

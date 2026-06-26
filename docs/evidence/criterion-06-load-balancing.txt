@@ -1,0 +1,140 @@
+# Evidence: GATE-06 — PgPool-II routing and load balancing (M4)
+# Date: 2026-06-26
+# Environment: isolated Docker Compose project `vehicle-insurance-m4-test`
+# Isolation: temporary networks 172.43.0.0/24, 172.44.0.0/24 and 172.45.0.0/24;
+#            temporary HBA counterparts were mounted only for this test. The
+#            existing `vehicle-insurance-ha` containers, networks, volumes and
+#            images were not changed.
+
+## 1. PgPool-II configuration and secure endpoint
+
+Command (test host):
+
+    docker run --rm --entrypoint pgpool vehicle-insurance-pgpool:4.7.2 --version
+
+Result:
+
+    pgpool-II version 4.7.2 (tasukiboshi)
+
+The image build pins the package `pgpool2=4.7.2-1.pgdg12+1`. PgPool listens on
+SQL port 9999; PCP listens only on localhost inside the container and is not
+published by Compose. `pool_hba.conf` uses `scram-sha-256` for the explicit
+application roles and `enable_pool_hba = on` is set.
+
+Relevant `pgpool.conf` settings:
+
+    backend_clustering_mode = 'streaming_replication'
+    load_balance_mode = on
+    statement_level_load_balance = on
+    sr_check_period = 3
+    delay_threshold = 10485760
+    health_check_period = 3
+
+This is PgPool streaming-replication mode; no native PgPool replication mode is
+configured. The 10 MiB `delay_threshold`, SR check, and health check prevent a
+lagging or unreachable backend from serving ordinary load-balanced reads.
+
+## 2. Fresh cluster and write routing
+
+Command through the single application endpoint (inside `pgpool`):
+
+    psql -h 127.0.0.1 -p 9999 -U app_auditor_ewa -d vehicle_insurance \
+      -c 'SHOW POOL_NODES'
+
+Result before failure:
+
+    node_id | hostname      | status | pg_status | role    | pg_role
+    --------+---------------+--------+-----------+---------+----------
+    0       | pg-primary    | up     | up        | primary | primary
+    1       | pg-standby-a  | up     | up        | standby | standby
+    2       | pg-standby-dr | up     | up        | standby | standby
+
+Command through `pgpool:9999`:
+
+    INSERT INTO insurance.customers(customer_number, first_name, last_name, national_id)
+    VALUES ('M4-WRITE-20260626', 'M4', 'Write', '11223344556')
+    RETURNING customer_number;
+
+Result:
+
+    M4-WRITE-20260626
+
+Direct confirmation on `pg-primary` as the technical administrator returned
+`M4-WRITE-20260626`; therefore the write reached the initial primary.
+
+## 3. Sixty independent safe reads
+
+Command repeated 60 times through PgPool:
+
+    psql -h 127.0.0.1 -p 9999 -U app_auditor_ewa -d vehicle_insurance \
+      -Atqc 'SELECT inet_server_addr()::text;'
+
+Distribution:
+
+    172.44.0.11/32 = 15  (pg-primary)
+    172.44.0.12/32 = 23  (pg-standby-a)
+    172.45.0.11/32 = 22  (pg-standby-dr)
+
+The samples use separate PgPool client connections and reached all three
+healthy backends.
+
+## 4. Health check detaches an unavailable standby
+
+Command (test host):
+
+    docker compose --env-file .env.example -p vehicle-insurance-m4-test \
+      -f docker-compose.yml -f docker-compose.m4-test.yml stop pg-standby-a
+
+After the configured health-check retry window, `SHOW POOL_NODES` reported:
+
+    node_id | hostname      | status | pg_status | role    | pg_role
+    --------+---------------+--------+-----------+---------+----------
+    0       | pg-primary    | up     | up        | primary | primary
+    1       | pg-standby-a  | down   | down      | standby | unknown
+    2       | pg-standby-dr | up     | up        | standby | standby
+
+Thirty subsequent independent reads through PgPool were distributed only to:
+
+    172.44.0.11/32 = 15  (pg-primary)
+    172.45.0.11/32 = 15  (pg-standby-dr)
+
+No read was sent to the detached address `172.44.0.12/32`.
+
+## 5. Site-A loss, DR promotion, and unchanged endpoint
+
+The isolated `pg-primary` and already-stopped `pg-standby-a` were confirmed not
+running before promotion. Command as container user `postgres` on
+`pg-standby-dr`:
+
+    repmgr -f /run/repmgr/repmgr.conf standby promote
+
+Result:
+
+    waiting for server to promote.... done
+    server promoted
+
+`SELECT pg_is_in_recovery();` on DR returned `f`. After PgPool health/SR
+polling, its row was:
+
+    2|pg-standby-dr|5432|up|up|0.333333|primary|primary|...|true|0|...
+
+Command through the unchanged `pgpool:9999` endpoint:
+
+    INSERT INTO insurance.customers(customer_number, first_name, last_name, national_id)
+    VALUES ('M4-DR-WRITE-20260626', 'M4', 'Failover', '66554433221')
+    RETURNING customer_number;
+
+Result:
+
+    M4-DR-WRITE-20260626
+
+## GATE-06 coverage
+
+- PgPool-II is the application SQL endpoint and PCP remains internal.
+- Three streaming-replication backends are discovered with correct roles.
+- Writes route to the current primary.
+- At least 60 independent safe reads reach more than one healthy backend.
+- Health check detaches an unavailable backend; subsequent reads exclude it.
+- SR check and a 10 MiB replication-delay threshold are configured.
+- After fenced Site-A loss and manual DR promotion, PgPool recognizes the new
+  primary and the same endpoint accepts a write.

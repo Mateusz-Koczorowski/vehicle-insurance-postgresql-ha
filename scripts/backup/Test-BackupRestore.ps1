@@ -1,97 +1,147 @@
 [CmdletBinding()]
-param([string]$EnvFile = ".env.example")
+param(
+    [Parameter(Mandatory)]
+    [string]$EnvFile,
+    [Parameter(Mandatory)]
+    [string]$ProjectName,
+    [string[]]$ComposeFiles = @("docker-compose.yml"),
+    [string]$BackupDirectory = "backups"
+)
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 Set-Location $root
 
+if ($ProjectName -notmatch '-m5-test$') {
+    throw "Refusing to reset vehicle_insurance_restore outside an isolated *-m5-test Compose project."
+}
+
 function Read-EnvValue([string]$Name) {
     $line = Get-Content -LiteralPath $EnvFile |
         Where-Object { $_ -match "^$([regex]::Escape($Name))=" } |
         Select-Object -Last 1
+    if (-not $line) { throw "Missing $Name in $EnvFile" }
     return ($line -split "=", 2)[1]
+}
+
+$composeArgs = @("--env-file", $EnvFile, "--project-name", $ProjectName)
+foreach ($composeFile in $ComposeFiles) {
+    $composeArgs += @("--file", $composeFile)
+}
+
+function Invoke-Compose {
+    param([Parameter(ValueFromRemainingArguments)] [string[]]$Arguments)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $result = & docker compose @composeArgs @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw "docker compose $($Arguments -join ' ') failed: $result" }
+    return $result
+}
+
+function Invoke-PgPoolQuery([string]$Database, [string]$Sql) {
+    $result = & docker compose @composeArgs exec -T `
+        -e "PGPASSWORD=$postgresPassword" -e "PGAPPNAME=pg_restore" pgpool `
+        psql -h pgpool -p 9999 -U postgres -d $Database `
+        -v ON_ERROR_STOP=1 -Atqc $Sql 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "PgPool query failed: $result" }
+    return $result
 }
 
 $postgresPassword = Read-EnvValue "POSTGRES_SUPERUSER_PASSWORD"
 $backupPassword = Read-EnvValue "BACKUP_PASSWORD"
 $nodes = @("pg-primary", "pg-standby-a", "pg-standby-dr")
-$primary = $null
-
-foreach ($node in $nodes) {
-    $isRunning = docker compose --env-file $EnvFile ps --status running --services $node
-    if (-not $isRunning) { continue }
-    $recovery = docker compose --env-file $EnvFile exec -T `
-        -e "PGPASSWORD=$postgresPassword" $node `
-        psql -h 127.0.0.1 -U postgres -d vehicle_insurance -Atqc `
-        "SELECT pg_is_in_recovery();"
-    if ($LASTEXITCODE -eq 0 -and $recovery.Trim() -eq "f") {
-        $primary = $node
-        break
-    }
-}
-if (-not $primary) { throw "No writable primary found" }
-
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$marker = "BACKUP-$timestamp"
-$nationalId = Get-Random -Minimum 10000000000 -Maximum 99999999999
+$marker = "M5BR-$(Get-Date -Format 'yyyyMMddHHmmss')"
+$nationalId = "8{0:D10}" -f (Get-Random -Minimum 0 -Maximum 1000000000)
 $dumpName = "vehicle_insurance-$timestamp.dump"
+$dumpPath = Join-Path $BackupDirectory $dumpName
+$containerDumpPath = "/tmp/$dumpName"
 
-Write-Host "[backup] primary: $primary; creating marker $marker"
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    psql -h 127.0.0.1 -U postgres -d vehicle_insurance -v ON_ERROR_STOP=1 -c `
-    "INSERT INTO insurance.customers(customer_number,first_name,last_name,national_id) VALUES ('$marker','Backup','Marker','$nationalId');"
-if ($LASTEXITCODE -ne 0) { throw "Could not create backup marker" }
+New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
 
-Write-Host "[backup] pg_dump --format=custom to ignored host bind ./backups/$dumpName"
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$backupPassword" $primary `
-    pg_dump -h 127.0.0.1 -U backup_operator -d vehicle_insurance `
-    --format=custom --file="/backups/$dumpName"
-if ($LASTEXITCODE -ne 0) { throw "pg_dump failed" }
+try {
+    Write-Host "[backup] removing stale M5 markers from previous interrupted test runs"
+    Invoke-PgPoolQuery "vehicle_insurance" `
+        "DELETE FROM insurance.customers WHERE customer_number LIKE 'M5BR-%';" | Out-Null
 
-docker compose --env-file $EnvFile exec -T $primary `
-    pg_restore --list "/backups/$dumpName" | Select-Object -First 5
-if ($LASTEXITCODE -ne 0) { throw "Dump is not a readable custom archive" }
+    Write-Host "[backup] creating marker $marker through pgpool:9999"
+    Invoke-PgPoolQuery "vehicle_insurance" `
+        "INSERT INTO insurance.customers(customer_number,first_name,last_name,national_id) VALUES ('$marker','Backup','Marker','$nationalId');" | Out-Null
 
-Write-Host "[backup] deleting marker from active database"
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    psql -h 127.0.0.1 -U postgres -d vehicle_insurance -v ON_ERROR_STOP=1 -c `
-    "DELETE FROM insurance.customers WHERE customer_number='$marker';"
-if ($LASTEXITCODE -ne 0) { throw "Marker deletion failed" }
+    Write-Host "[backup] pg_dump --format=custom through pgpool:9999 as backup_operator"
+    $dumpOutput = & docker compose @composeArgs exec -T `
+        -e "PGPASSWORD=$backupPassword" pgpool `
+        pg_dump -h pgpool -p 9999 -U backup_operator -d vehicle_insurance `
+        --format=custom --file=$containerDumpPath 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "pg_dump through PgPool failed: $dumpOutput" }
 
-Start-Sleep -Seconds 3
-foreach ($node in $nodes) {
-    if ($node -eq $primary) { continue }
-    $isRunning = docker compose --env-file $EnvFile ps --status running --services $node
-    if (-not $isRunning) { continue }
-    $count = docker compose --env-file $EnvFile exec -T `
-        -e "PGPASSWORD=$postgresPassword" $node `
-        psql -h 127.0.0.1 -U postgres -d vehicle_insurance -Atqc `
-        "SELECT count(*) FROM insurance.customers WHERE customer_number='$marker';"
-    if ($count.Trim() -ne "0") { throw "Logical DELETE did not reach $node" }
-    Write-Host "[backup] $node also has no marker: replication propagated DELETE"
+    Invoke-Compose -Arguments @("cp", "pgpool:$containerDumpPath", $dumpPath) | Out-Null
+    if (-not (Test-Path -LiteralPath $dumpPath)) { throw "Host dump was not created: $dumpPath" }
+    Write-Host "[backup] custom archive copied to ignored host path $dumpPath (outside PGDATA volumes)"
+
+    $archiveList = Invoke-Compose -Arguments @("exec", "-T", "pgpool", "pg_restore", "--list", $containerDumpPath)
+    if (-not $archiveList) { throw "pg_restore --list returned no archive entries" }
+
+    Write-Host "[backup] deleting marker through pgpool:9999"
+    Invoke-PgPoolQuery "vehicle_insurance" `
+        "DELETE FROM insurance.customers WHERE customer_number='$marker';" | Out-Null
+
+    $activeCount = (Invoke-PgPoolQuery "vehicle_insurance" `
+        "SELECT count(*) FROM insurance.customers WHERE customer_number='$marker';").Trim()
+    if ($activeCount -ne "0") { throw "Active database still contains marker after DELETE" }
+    Write-Host "[backup] active database has no marker"
+
+    Start-Sleep -Seconds 3
+    foreach ($node in $nodes) {
+        $recovery = Invoke-Compose -Arguments @(
+            "exec", "-T", "-e", "PGPASSWORD=$postgresPassword", $node,
+            "psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "vehicle_insurance", "-Atqc",
+            "SELECT pg_is_in_recovery();"
+        )
+        if ($recovery.Trim() -ne "t") { continue }
+        $standbyCount = Invoke-Compose -Arguments @(
+            "exec", "-T", "-e", "PGPASSWORD=$postgresPassword", $node,
+            "psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "vehicle_insurance", "-Atqc",
+            "SELECT count(*) FROM insurance.customers WHERE customer_number='$marker';"
+        )
+        if ($standbyCount.Trim() -ne "0") { throw "Logical DELETE did not reach standby $node" }
+        Write-Host "[backup] standby $node also has no marker: DELETE replicated"
+    }
+
+    Write-Host "[backup] creating separate vehicle_insurance_restore through pgpool:9999"
+    Invoke-Compose -Arguments @(
+        "exec", "-T", "-e", "PGPASSWORD=$postgresPassword", "pgpool",
+        "dropdb", "-h", "pgpool", "-p", "9999", "-U", "postgres", "--if-exists", "--force",
+        "vehicle_insurance_restore"
+    ) | Out-Null
+    Invoke-Compose -Arguments @(
+        "exec", "-T", "-e", "PGPASSWORD=$postgresPassword", "pgpool",
+        "createdb", "-h", "pgpool", "-p", "9999", "-U", "postgres", "vehicle_insurance_restore"
+    ) | Out-Null
+
+    Write-Host "[backup] pg_restore only into vehicle_insurance_restore through pgpool:9999"
+    Invoke-Compose -Arguments @(
+        "exec", "-T", "-e", "PGPASSWORD=$postgresPassword", "pgpool",
+        "pg_restore", "-h", "pgpool", "-p", "9999", "-U", "postgres",
+        "-d", "vehicle_insurance_restore", "--no-owner", "--no-privileges", $containerDumpPath
+    ) | Out-Null
+
+    $restored = (Invoke-PgPoolQuery "vehicle_insurance_restore" `
+        "SELECT customer_number FROM insurance.customers WHERE customer_number='$marker';").Trim()
+    if ($restored -ne $marker) { throw "Deleted marker was not recovered in vehicle_insurance_restore" }
+    $activeAfterRestore = (Invoke-PgPoolQuery "vehicle_insurance" `
+        "SELECT count(*) FROM insurance.customers WHERE customer_number='$marker';").Trim()
+    if ($activeAfterRestore -ne "0") { throw "Restore unexpectedly changed active vehicle_insurance" }
+
+    Write-Host "[backup] PASS: $marker is recovered only in vehicle_insurance_restore"
 }
-
-Write-Host "[backup] restoring to separate vehicle_insurance_restore database"
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    dropdb -h 127.0.0.1 -U postgres --if-exists vehicle_insurance_restore
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    createdb -h 127.0.0.1 -U postgres vehicle_insurance_restore
-docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    pg_restore -h 127.0.0.1 -U postgres -d vehicle_insurance_restore `
-    --no-owner --no-privileges "/backups/$dumpName"
-if ($LASTEXITCODE -ne 0) { throw "pg_restore failed" }
-
-$restored = docker compose --env-file $EnvFile exec -T `
-    -e "PGPASSWORD=$postgresPassword" $primary `
-    psql -h 127.0.0.1 -U postgres -d vehicle_insurance_restore -Atqc `
-    "SELECT customer_number FROM insurance.customers WHERE customer_number='$marker';"
-if ($restored.Trim() -ne $marker) { throw "Deleted marker was not recovered" }
-
-Write-Host "[backup] PASS: $marker recovered only in vehicle_insurance_restore"
-Write-Host "[backup] artifact: backups/$dumpName (ignored by Git; outside PGDATA volumes)"
+finally {
+    & docker compose @composeArgs exec -T pgpool rm -f $containerDumpPath 2>$null | Out-Null
+    if (Test-Path -LiteralPath $dumpPath) { Remove-Item -LiteralPath $dumpPath -Force }
+}

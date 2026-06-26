@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 required=(
+  POSTGRES_SUPERUSER_PASSWORD
   HEALTHCHECK_PASSWORD
   APP_AGENT_PASSWORD APP_ADJUSTER_PASSWORD APP_AUDITOR_PASSWORD
   BACKUP_PASSWORD
@@ -19,6 +20,7 @@ sed -i \
   /tmp/pgpool.conf
 
 cat >/tmp/pool_passwd <<EOF
+postgres:TEXT${POSTGRES_SUPERUSER_PASSWORD}
 healthcheck_user:TEXT${HEALTHCHECK_PASSWORD}
 app_agent_anna:TEXT${APP_AGENT_PASSWORD}
 app_adjuster_piotr:TEXT${APP_ADJUSTER_PASSWORD}

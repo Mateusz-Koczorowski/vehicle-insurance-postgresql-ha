@@ -1,0 +1,48 @@
+# Evidence: GATE-08 — security baseline (10 points)
+# Date: 2026-06-26
+# Host: local Docker Desktop (Windows), isolated container `vehicle-insurance-m2-test`
+
+## Source-image verification
+
+The PostgreSQL image was rebuilt from `infrastructure/postgres/Dockerfile` and
+started as an isolated, disposable container with the repository's
+`postgresql.conf`, `pg_hba.conf`, initialization script and M1 database files.
+Temporary passwords were provided through container environment variables only.
+
+The following checks passed:
+
+```text
+SHOW password_encryption;                                      -> scram-sha-256
+count of SCRAM verifiers for the 3 business login roles        -> 3
+connection as postgres with a deliberately wrong password      -> rejected
+connection as app_agent_anna from 127.0.0.1                   -> rejected by HBA
+loaded host HBA rules using trust or 0.0.0.0/0                -> 0
+```
+
+The source HBA accepts the `postgres` administrator only from loopback and
+allows business roles only from the PgPool-II addresses in the project
+networks. Therefore a business account cannot connect directly from loopback.
+
+## Repository safety scan
+
+Command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/evidence/Test-RepositorySafety.ps1
+```
+
+Result:
+
+```text
+[safety] PASS: no tracked dumps/PGDATA/keys, no network trust,
+no published PostgreSQL
+```
+
+## Confirmation
+
+This evidence covers SCRAM password storage and authentication, limited HBA
+sources, no network `trust`, no business `0.0.0.0/0` rule, no secrets or
+generated database artefacts tracked by Git, and no published PostgreSQL or
+PCP host ports. End-to-end business authentication via PgPool-II remains part
+of the M4 integration test.

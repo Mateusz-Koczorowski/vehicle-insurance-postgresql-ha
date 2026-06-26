@@ -15,7 +15,11 @@ if ($forbiddenTracked) {
 
 $dangerousHba = rg -n "^\s*host.*\btrust\b|^\s*host.*0\.0\.0\.0/0" `
     infrastructure database docker-compose.yml
-if ($LASTEXITCODE -eq 0) { throw "Unsafe HBA rule found: $dangerousHba" }
+$dangerousHbaExitCode = $LASTEXITCODE
+if ($dangerousHbaExitCode -eq 0) { throw "Unsafe HBA rule found: $dangerousHba" }
+if ($dangerousHbaExitCode -ne 1) {
+    throw "rg failed while checking HBA rules (exit $dangerousHbaExitCode): $dangerousHba"
+}
 
 $published = docker compose --env-file .env.example config --format json |
     ConvertFrom-Json
@@ -30,8 +34,17 @@ $secretPatterns = @(
     "postgresql://[^:`"\s]+:[^@`"\s]+@"
 )
 foreach ($pattern in $secretPatterns) {
-    $matches = rg -n $pattern . -g "!.git/**" -g "!backups/**"
-    if ($LASTEXITCODE -eq 0) { throw "Potential secret found: $matches" }
+    $matches = rg -n `
+        -g "!.git/**" `
+        -g "!backups/**" `
+        -g "!scripts/evidence/Test-RepositorySafety.ps1" `
+        -- $pattern .
+    $rgExitCode = $LASTEXITCODE
+    if ($rgExitCode -eq 0) { throw "Potential secret found: $matches" }
+    if ($rgExitCode -ne 1) {
+        throw "rg failed while scanning for secrets (exit $rgExitCode): $matches"
+    }
 }
 
 Write-Host "[safety] PASS: no tracked dumps/PGDATA/keys, no network trust, no published PostgreSQL"
+exit 0

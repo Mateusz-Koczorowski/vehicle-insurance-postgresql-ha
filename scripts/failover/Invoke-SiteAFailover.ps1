@@ -26,7 +26,7 @@ if ($runningA) { throw "Fencing failed; a location-A database is still running: 
 Write-Host "[failover] fencing confirmed: both site-A database containers are stopped"
 
 Write-Host "[failover] promoting pg-standby-dr manually with repmgr"
-docker compose --env-file $EnvFile exec -T `
+docker compose --env-file $EnvFile exec -T --user postgres `
     -e "PGPASSWORD=$repmgrPassword" pg-standby-dr `
     repmgr -f /run/repmgr/repmgr.conf standby promote
 if ($LASTEXITCODE -ne 0) { throw "DR promotion failed" }
@@ -42,8 +42,23 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
 }
 if ($recovery.Trim() -ne "f") { throw "DR node is still in recovery" }
 
-Write-Host "[failover] waiting for PgPool-II to recognize the new primary"
-Start-Sleep -Seconds 15
+Write-Host "[failover] waiting for PgPool-II to recognize pg-standby-dr as primary"
+$poolPrimary = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    $poolNodes = docker compose --env-file $EnvFile exec -T `
+        -e "PGPASSWORD=$agentPassword" pgpool `
+        psql -h 127.0.0.1 -p 9999 -U app_agent_anna -d vehicle_insurance `
+        -At -F "|" -c "SHOW POOL_NODES" 2>$null
+    if ($LASTEXITCODE -eq 0 -and ($poolNodes | Where-Object {
+        $_ -match '^2\|pg-standby-dr\|5432\|up\|up\|.*\|primary\|primary\|'
+    })) {
+        $poolPrimary = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $poolPrimary) { throw "PgPool-II did not recognize pg-standby-dr as primary" }
+
 $suffix = Get-Random -Minimum 10000000000 -Maximum 99999999999
 $customerNumber = "DR-" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $sql = "INSERT INTO insurance.customers(customer_number,first_name,last_name,national_id) VALUES ('$customerNumber','Failover','Probe','$suffix') RETURNING customer_number;"
