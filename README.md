@@ -19,11 +19,15 @@ kolejności prac i kryteriów odbioru.
 
 ## Stan implementacji
 
-Etapy 0–2 dostarczają strukturę repozytorium, kontrakt architektoniczny i
-szkielet Docker Compose. Węzły PostgreSQL są na tym etapie niezależne:
-replikacja, repmgr, właściwa konfiguracja PgPool-II i aplikacja zostaną dodane
-w kolejnych etapach. Usługi `pgpool` i `insurance-app` są jawnie oznaczonymi
-placeholderami.
+Etapy M1-M6 dostarczają punktowany rdzeń projektu: model danych, role,
+SCRAM/HBA, replikację z repmgr, PgPool-II, backup/restore oraz małą
+miniaplikację FastAPI/Jinja. Repozytorium jest przygotowywane do M7:
+integracji końcowej, zebrania dowodów i siedmiominutowego demo.
+
+Główny `docker-compose.yml` uruchamia pięć usług wymaganych przez kontrakt:
+`insurance-app`, `pgpool`, `pg-primary`, `pg-standby-a` i `pg-standby-dr`.
+PostgreSQL oraz PCP nie są publikowane na hoście; aplikacja korzysta z
+endpointu `pgpool:9999`.
 
 ## Szybka weryfikacja
 
@@ -31,15 +35,17 @@ Nie kopiuj przykładowych wartości do środowiska współdzielonego lub
 produkcyjnego.
 
 ```powershell
-docker compose --env-file .env.example config
-powershell -File scripts/setup/Test-RepositoryStructure.ps1
+docker compose --env-file .env.example -f docker-compose.yml config --quiet
+python -m pytest app/tests -q
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/evidence/Test-RepositorySafety.ps1
+git diff --check
 ```
 
-Opcjonalne uruchomienie szkieletu:
+Opcjonalne uruchomienie demo:
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up -d
+docker compose --env-file .env up -d --build
 docker compose ps
 ```
 

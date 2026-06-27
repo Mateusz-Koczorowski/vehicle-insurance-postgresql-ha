@@ -1,7 +1,7 @@
 # Kontrakt architektoniczny
 
-Status: zaakceptowany kontrakt docelowy; bieżący Compose zawiera placeholdery
-PgPool-II i aplikacji do czasu odpowiednich etapów implementacji.
+Status: zaakceptowany kontrakt docelowy; bieżący Compose zawiera właściwe
+obrazy PostgreSQL/repmgr, PgPool-II oraz miniaplikację demonstracyjną.
 
 Dokument zamraża nazwy, adresy, przepływy, granice bezpieczeństwa i
 odpowiedzialność komponentów. Zmiana interfejsu wymaga koordynacji przez
