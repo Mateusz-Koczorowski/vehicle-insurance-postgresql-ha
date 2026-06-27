@@ -138,3 +138,33 @@ Result:
 - SR check and a 10 MiB replication-delay threshold are configured.
 - After fenced Site-A loss and manual DR promotion, PgPool recognizes the new
   primary and the same endpoint accepts a write.
+
+## M7 refresh - current demo stack
+
+Date: 2026-06-27
+Environment: main Docker Compose project `vehicle-insurance-ha`
+Command:
+
+    powershell -NoProfile -ExecutionPolicy Bypass \
+      -File scripts/demo/Show-PgPoolLoadBalancing.ps1 \
+      -EnvFile .env \
+      -Samples 60
+
+Relevant `SHOW POOL_NODES` result:
+
+    pg-primary    | up | up | primary | primary
+    pg-standby-a  | up | up | standby | standby | streaming
+    pg-standby-dr | up | up | standby | standby | streaming
+
+Distribution from 60 independent safe reads through PgPool:
+
+    172.32.0.11/32 = 26
+    172.31.0.12/32 = 17
+    172.31.0.11/32 = 17
+
+Result:
+
+    [pgpool-demo] PASS: 60 reads reached 3 backend nodes
+
+This confirms that the current demo stack exposes one PgPool-II SQL endpoint and
+routes read-only queries to multiple healthy PostgreSQL backends.

@@ -19,11 +19,18 @@ function Invoke-Sql(
     [string]$Sql,
     [bool]$ShouldSucceed
 ) {
-    $output = docker compose --env-file $EnvFile exec -T `
-        -e "PGPASSWORD=$Password" pgpool `
-        psql -h 127.0.0.1 -p 9999 -U $User -d vehicle_insurance `
-        -v ON_ERROR_STOP=1 -Atqc $Sql 2>&1
-    $succeeded = $LASTEXITCODE -eq 0
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = docker compose --env-file $EnvFile exec -T `
+            -e "PGPASSWORD=$Password" pgpool `
+            psql -h 127.0.0.1 -p 9999 -U $User -d vehicle_insurance `
+            -v ON_ERROR_STOP=1 -Atqc $Sql 2>&1
+        $succeeded = $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     Write-Host "[$User] $output"
     if ($succeeded -ne $ShouldSucceed) {
         throw "Unexpected permission result for $User; expected success=$ShouldSucceed"

@@ -155,3 +155,50 @@ and pgBackRest remain optional project extensions and were not used for GATE-07.
 - Deleted record recovered from backup: section 4.
 - Active database not overwritten: active count remains `0`.
 - Replication not presented as backup: section 5.
+
+## M7 refresh - isolated backup/restore rehearsal
+
+Date: 2026-06-27
+Environment: isolated Docker Compose project `vehicle-insurance-m5-test`
+Isolation:
+
+- host PgPool port overridden to `19999`;
+- host application port overridden to `18000`;
+- overlay networks from `docker-compose.m5-test.yml`;
+- main demo project `vehicle-insurance-ha` was not stopped or modified.
+
+Start command:
+
+    $env:PGPOOL_HOST_PORT='19999'
+    $env:APP_HOST_PORT='18000'
+    docker compose --env-file .env \
+      --project-name vehicle-insurance-m5-test \
+      -f docker-compose.yml \
+      -f docker-compose.m5-test.yml \
+      up -d --build
+
+Backup/restore command:
+
+    $env:PGPOOL_HOST_PORT='19999'
+    $env:APP_HOST_PORT='18000'
+    powershell -NoProfile -ExecutionPolicy Bypass \
+      -File scripts/backup/Test-BackupRestore.ps1 \
+      -EnvFile .env \
+      -ProjectName vehicle-insurance-m5-test \
+      -ComposeFiles docker-compose.yml,docker-compose.m5-test.yml \
+      -BackupDirectory backups
+
+Important result:
+
+    [backup] creating marker M5BR-20260627144059 through pgpool:9999
+    [backup] pg_dump --format=custom through pgpool:9999 as backup_operator
+    [backup] deleting marker through pgpool:9999
+    [backup] active database has no marker
+    [backup] standby pg-standby-a also has no marker: DELETE replicated
+    [backup] standby pg-standby-dr also has no marker: DELETE replicated
+    [backup] pg_restore only into vehicle_insurance_restore through pgpool:9999
+    [backup] PASS: M5BR-20260627144059 is recovered only in vehicle_insurance_restore
+
+The script removed the host dump from `backups/` in its `finally` block. The
+isolated M5 containers were stopped after the rehearsal; their Docker volumes
+were intentionally not deleted without explicit approval.
